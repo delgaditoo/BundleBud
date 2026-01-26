@@ -5,11 +5,66 @@ import fs from 'fs/promises'
 import { scanFiles, analyzeDuplicates, executePlan } from './fs.js'
 import { appendEntry, clearAll, readRecent } from './agent/ledger.js'
 import { randomUUID } from 'crypto'
+import chokidar from 'chokidar'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 let mainWindow
+let desktopWatcher = null
+
+function isDesktopWatcherRunning() {
+  return Boolean(desktopWatcher)
+}
+
+function shouldIgnoreDesktopFile(targetPath) {
+  const base = path.basename(targetPath)
+  if (base === '.DS_Store') return true
+  return base.startsWith('.')
+}
+
+async function startDesktopWatcher() {
+  if (desktopWatcher) return { running: true }
+  if (process.platform !== 'darwin') return { running: false }
+
+  const desktopPath = app.getPath('desktop')
+  desktopWatcher = chokidar.watch(desktopPath, {
+    ignoreInitial: true,
+    depth: 0,
+    ignored: (targetPath) => shouldIgnoreDesktopFile(targetPath)
+  })
+
+  desktopWatcher.on('add', async (filePath) => {
+    if (shouldIgnoreDesktopFile(filePath)) return
+    const entry = {
+      id: randomUUID(),
+      ts: Date.now(),
+      kind: 'event',
+      title: 'File detected',
+      path: filePath,
+      status: 'info',
+      meta: { source: 'desktop-watcher', eventType: 'add' }
+    }
+    try {
+      await appendEntry(entry)
+    } catch (err) {
+      console.error('Failed to append desktop watcher entry', err)
+    }
+  })
+
+  desktopWatcher.on('error', (err) => {
+    console.error('Desktop watcher error', err)
+  })
+
+  return { running: true }
+}
+
+async function stopDesktopWatcher() {
+  if (!desktopWatcher) return { running: false }
+  await desktopWatcher.close()
+  desktopWatcher = null
+  return { running: false }
+}
 
 function getDevServerUrl() {
   return process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
@@ -46,6 +101,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', async () => {
+  await stopDesktopWatcher()
 })
 
 ipcMain.handle('select-folder', async () => {
@@ -112,4 +171,16 @@ ipcMain.handle('activity:addTestEntry', async () => {
   }
   await appendEntry(entry)
   return entry
+})
+
+ipcMain.handle('desktop-watcher:start', async () => {
+  return startDesktopWatcher()
+})
+
+ipcMain.handle('desktop-watcher:stop', async () => {
+  return stopDesktopWatcher()
+})
+
+ipcMain.handle('desktop-watcher:status', async () => {
+  return { running: isDesktopWatcherRunning() }
 })

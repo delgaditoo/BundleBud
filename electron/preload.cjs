@@ -10,5 +10,8 @@ contextBridge.exposeInMainWorld('api', {
   openReportFolder: (reportPath) => ipcRenderer.invoke('open-report-folder', reportPath),
   getActivity: (limit) => ipcRenderer.invoke('activity:getRecent', limit),
   clearActivity: () => ipcRenderer.invoke('activity:clear'),
-  addTestActivity: () => ipcRenderer.invoke('activity:addTestEntry')
+  addTestActivity: () => ipcRenderer.invoke('activity:addTestEntry'),
+  startDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:start'),
+  stopDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:stop'),
+  getDesktopWatcherStatus: () => ipcRenderer.invoke('desktop-watcher:status')
 })

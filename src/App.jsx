@@ -34,12 +34,17 @@ export default function App() {
   const [activityEntries, setActivityEntries] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
+  const [watcherStatus, setWatcherStatus] = useState({ running: false })
+  const [watcherBusy, setWatcherBusy] = useState(false)
 
   const suggestions = analysis.suggestions || []
 
   useEffect(() => {
-    loadActivity(50)
-  }, [])
+    if (view === 'activity') {
+      loadActivity(50)
+      loadWatcherStatus()
+    }
+  }, [view])
 
   async function loadActivity(limit = 50) {
     setActivityError('')
@@ -54,6 +59,45 @@ export default function App() {
       setActivityError(err?.message || 'Failed to load activity.')
     } finally {
       setActivityLoading(false)
+    }
+  }
+
+  async function loadWatcherStatus() {
+    setWatcherBusy(true)
+    try {
+      if (!api?.getDesktopWatcherStatus) {
+        throw new Error('Desktop watcher bridge unavailable.')
+      }
+      const status = await api.getDesktopWatcherStatus()
+      if (typeof status?.running === 'boolean') {
+        setWatcherStatus(status)
+      } else {
+        setWatcherStatus({ running: false })
+      }
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to load watcher status.')
+    } finally {
+      setWatcherBusy(false)
+    }
+  }
+
+  async function handleToggleWatcher() {
+    setActivityError('')
+    setWatcherBusy(true)
+    try {
+      if (!api?.startDesktopWatcher || !api?.stopDesktopWatcher) {
+        throw new Error('Desktop watcher bridge unavailable.')
+      }
+      if (watcherStatus.running) {
+        await api.stopDesktopWatcher()
+      } else {
+        await api.startDesktopWatcher()
+      }
+      await loadWatcherStatus()
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to toggle watcher.')
+    } finally {
+      setWatcherBusy(false)
     }
   }
 
@@ -195,6 +239,20 @@ export default function App() {
           </header>
 
           {activityError ? <div className="error">{activityError}</div> : null}
+
+          <section className="section watcher-panel">
+            <div>
+              <div className="label">Desktop Watcher</div>
+              <div className="muted">Status: {watcherStatus.running ? 'Running' : 'Stopped'}</div>
+            </div>
+            <button
+              className={watcherStatus.running ? 'ghost' : 'secondary'}
+              onClick={handleToggleWatcher}
+              disabled={watcherBusy}
+            >
+              {watcherStatus.running ? 'Off' : 'On'}
+            </button>
+          </section>
 
           <section className="section activity-controls">
             <button className="secondary" onClick={handleAddTestActivity} disabled={activityLoading}>

@@ -11,6 +11,7 @@
     "electron": "env -u ELECTRON_RUN_AS_NODE electron ."
   },
   "dependencies": {
+    "chokidar": "^3.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
