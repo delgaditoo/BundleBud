@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 
 const DEFAULT_MAX_SIZE_MB = 250
 
@@ -14,8 +14,14 @@ function formatBytes(bytes) {
   return `${size.toFixed(1)} ${units[unitIndex]}`
 }
 
+function formatLocalTime(ts) {
+  if (!ts) return '—'
+  return new Date(ts).toLocaleString()
+}
+
 export default function App() {
   const api = window.api
+  const [view, setView] = useState('organizer')
   const [step, setStep] = useState('setup')
   const [folderPath, setFolderPath] = useState('')
   const [scanResult, setScanResult] = useState({ files: [], totalSize: 0, truncated: false, maxFiles: 0 })
@@ -25,13 +31,62 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState(null)
   const [error, setError] = useState('')
+  const [activityEntries, setActivityEntries] = useState([])
+  const [activityLoading, setActivityLoading] = useState(false)
+  const [activityError, setActivityError] = useState('')
 
   const suggestions = analysis.suggestions || []
+
+  useEffect(() => {
+    loadActivity(50)
+  }, [])
+
+  async function loadActivity(limit = 50) {
+    setActivityError('')
+    setActivityLoading(true)
+    try {
+      if (!api?.getActivity) {
+        throw new Error('Activity bridge unavailable. Please restart the app.')
+      }
+      const entries = await api.getActivity(limit)
+      setActivityEntries(Array.isArray(entries) ? entries : [])
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to load activity.')
+    } finally {
+      setActivityLoading(false)
+    }
+  }
+
+  async function handleAddTestActivity() {
+    setActivityError('')
+    setActivityLoading(true)
+    try {
+      await api?.addTestActivity?.()
+      await loadActivity(50)
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to add test activity.')
+    } finally {
+      setActivityLoading(false)
+    }
+  }
+
+  async function handleClearActivity() {
+    setActivityError('')
+    setActivityLoading(true)
+    try {
+      await api?.clearActivity?.()
+      await loadActivity(50)
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to clear activity.')
+    } finally {
+      setActivityLoading(false)
+    }
+  }
 
   async function handleSelectFolder() {
     setError('')
     if (!api?.selectFolder || !api?.scanFiles) {
-      setError('Bridge nicht verfügbar. Bitte App neu starten.')
+      setError('Bridge unavailable. Please restart the app.')
       return
     }
 
@@ -44,7 +99,7 @@ export default function App() {
       const result = await api.scanFiles(path)
       setScanResult(result || { files: [], totalSize: 0, truncated: false, maxFiles: 0 })
     } catch (err) {
-      setError(err?.message || 'Scan fehlgeschlagen')
+      setError(err?.message || 'Scan failed')
     } finally {
       setLoading(false)
     }
@@ -66,7 +121,7 @@ export default function App() {
       setSelected(nextSelected)
       setStep('review')
     } catch (err) {
-      setError(err?.message || 'Analyse fehlgeschlagen')
+      setError(err?.message || 'Analysis failed')
     } finally {
       setLoading(false)
     }
@@ -104,7 +159,7 @@ export default function App() {
       setReport(result)
       setStep('done')
     } catch (err) {
-      setError(err?.message || 'Ausführen fehlgeschlagen')
+      setError(err?.message || 'Execution failed')
     } finally {
       setLoading(false)
     }
@@ -123,6 +178,71 @@ export default function App() {
     [selected]
   )
 
+  if (view === 'activity') {
+    return (
+      <div className="page">
+        <div className="card">
+          <header className="header">
+            <div>
+              <h1>Activity Ledger</h1>
+              <p>Local-only flight recorder for BundleBud.</p>
+            </div>
+            <div className="header-actions">
+              <button className="ghost" onClick={() => setView('organizer')}>
+                Back to Organizer
+              </button>
+            </div>
+          </header>
+
+          {activityError ? <div className="error">{activityError}</div> : null}
+
+          <section className="section activity-controls">
+            <button className="secondary" onClick={handleAddTestActivity} disabled={activityLoading}>
+              Add test event
+            </button>
+            <button className="ghost" onClick={handleClearActivity} disabled={activityLoading}>
+              Clear log
+            </button>
+            <button className="ghost" onClick={() => loadActivity(50)} disabled={activityLoading}>
+              Refresh
+            </button>
+          </section>
+
+          <section className="section activity-list">
+            {activityLoading ? <p className="muted">Loading activity…</p> : null}
+            {!activityLoading && !activityEntries.length ? (
+              <p className="muted">No activity yet.</p>
+            ) : null}
+            {!activityLoading && activityEntries.length
+              ? activityEntries
+                  .slice()
+                  .reverse()
+                  .map((entry) => (
+                    <div className="activity-entry" key={entry.id}>
+                      <div>
+                        <div className="activity-title">
+                          <span className={`badge badge-${entry.status || 'info'}`}>
+                            {entry.status || 'info'}
+                          </span>
+                          <span>{entry.title}</span>
+                        </div>
+                        {entry.path ? <div className="mono muted">{entry.path}</div> : null}
+                        {entry.meta ? (
+                          <div className="muted">{entry.kind} · {JSON.stringify(entry.meta)}</div>
+                        ) : (
+                          <div className="muted">{entry.kind}</div>
+                        )}
+                      </div>
+                      <div className="muted">{formatLocalTime(entry.ts)}</div>
+                    </div>
+                  ))
+              : null}
+          </section>
+        </div>
+      </div>
+    )
+  }
+
   if (step === 'setup') {
     return (
       <div className="page">
@@ -130,37 +250,42 @@ export default function App() {
           <header className="header">
             <div>
               <h1>AI File Organizer</h1>
-              <p>Duplicate Finder mit sicherem Archiv</p>
+              <p>Duplicate finder with a safe archive.</p>
             </div>
-            <button className="ghost" onClick={() => api?.openExternal('https://electronjs.org')}>
-              Electron Docs
-            </button>
+            <div className="header-actions">
+              <button className="ghost" onClick={() => setView('activity')}>
+                Activity
+              </button>
+              <button className="ghost" onClick={() => api?.openExternal('https://electronjs.org')}>
+                Electron Docs
+              </button>
+            </div>
           </header>
 
           {error ? <div className="error">{error}</div> : null}
 
           <section className="section">
             <button className="primary" onClick={handleSelectFolder} disabled={loading}>
-              Ordner auswählen
+              Select folder
             </button>
             {folderPath ? (
               <div className="summary">
                 <div className="summary-row">
-                  <span>Ordner</span>
+                  <span>Folder</span>
                   <span className="mono">{folderPath}</span>
                 </div>
                 <div className="summary-row">
-                  <span>Gefundene Dateien</span>
+                  <span>Files found</span>
                   <span>{scanResult.files.length}</span>
                 </div>
                 <div className="summary-row">
-                  <span>Gesamtgröße</span>
+                  <span>Total size</span>
                   <span>{formatBytes(scanResult.totalSize)}</span>
                 </div>
                 {scanResult.truncated ? (
                   <div className="summary-row">
-                    <span>Hinweis</span>
-                    <span>Limit {scanResult.maxFiles} erreicht</span>
+                    <span>Note</span>
+                    <span>Limit {scanResult.maxFiles} reached</span>
                   </div>
                 ) : null}
               </div>
@@ -168,7 +293,7 @@ export default function App() {
           </section>
 
           <section className="section">
-            <label className="label">Max. Dateigröße fürs Hashing (MB)</label>
+            <label className="label">Max file size for hashing (MB)</label>
             <input
               type="number"
               min="1"
@@ -185,7 +310,7 @@ export default function App() {
               onClick={handleAnalyze}
               disabled={loading || !scanResult.files.length}
             >
-              {loading ? 'Analysiere…' : 'Duplikate analysieren'}
+              {loading ? 'Analyzing…' : 'Analyze duplicates'}
             </button>
           </section>
         </div>
@@ -199,18 +324,23 @@ export default function App() {
         <div className="card">
           <header className="header">
             <div>
-              <h1>Vorschläge prüfen</h1>
-              <p>Archiviert Duplikate, Trash bleibt optional</p>
+              <h1>Review suggestions</h1>
+              <p>Archives duplicates, trash remains optional.</p>
             </div>
-            <button className="ghost" onClick={() => setStep('setup')}>
-              Zurück
-            </button>
+            <div className="header-actions">
+              <button className="ghost" onClick={() => setStep('setup')}>
+                Back
+              </button>
+              <button className="ghost" onClick={() => setView('activity')}>
+                Activity
+              </button>
+            </div>
           </header>
 
           <div className="stats">
             <div>
               <strong>{grouped['move-to-archive'].length}</strong>
-              <span>Archiv</span>
+              <span>Archive</span>
             </div>
             <div>
               <strong>{grouped['move-to-trash'].length}</strong>
@@ -225,9 +355,9 @@ export default function App() {
           {['move-to-archive', 'move-to-trash', 'keep'].map((type) => (
             <section className="section" key={type}>
               <h2>
-                {type === 'move-to-archive' && 'Archivieren'}
-                {type === 'move-to-trash' && 'In den Papierkorb'}
-                {type === 'keep' && 'Behalten'}
+                {type === 'move-to-archive' && 'Archive'}
+                {type === 'move-to-trash' && 'Move to Trash'}
+                {type === 'keep' && 'Keep'}
               </h2>
               {grouped[type].length ? (
                 grouped[type].map((item) => (
@@ -273,21 +403,21 @@ export default function App() {
                   </div>
                 ))
               ) : (
-                <p className="muted">Keine Einträge</p>
+                <p className="muted">No entries</p>
               )}
             </section>
           ))}
 
           <footer className="footer">
             <button className="ghost" onClick={() => setStep('setup')}>
-              Abbrechen
+              Cancel
             </button>
             <button
               className="primary"
               onClick={handleExecute}
               disabled={loading || selectedCount === 0}
             >
-              {loading ? 'Ausführen…' : `Ausführen (${selectedCount})`}
+              {loading ? 'Executing…' : `Execute (${selectedCount})`}
             </button>
           </footer>
         </div>
@@ -300,15 +430,20 @@ export default function App() {
       <div className="card">
         <header className="header">
           <div>
-            <h1>Fertig</h1>
-            <p>Der Lauf wurde dokumentiert</p>
+            <h1>Done</h1>
+            <p>The run has been logged.</p>
+          </div>
+          <div className="header-actions">
+            <button className="ghost" onClick={() => setView('activity')}>
+              Activity
+            </button>
           </div>
         </header>
 
         <section className="section">
           <div className="summary">
             <div className="summary-row">
-              <span>Archiviert</span>
+              <span>Archived</span>
               <span>{report?.summary?.archived ?? 0}</span>
             </div>
             <div className="summary-row">
@@ -316,7 +451,7 @@ export default function App() {
               <span>{report?.summary?.trashed ?? 0}</span>
             </div>
             <div className="summary-row">
-              <span>Fehler</span>
+              <span>Errors</span>
               <span>{report?.summary?.failed ?? 0}</span>
             </div>
           </div>
@@ -328,13 +463,13 @@ export default function App() {
             onClick={() => api?.openReportFolder(report?.reportPath)}
             disabled={!report?.reportPath}
           >
-            Report-Ordner öffnen
+            Open report folder
           </button>
         </section>
 
         <footer className="footer">
           <button className="primary" onClick={() => setStep('setup')}>
-            Neuer Lauf
+            New run
           </button>
         </footer>
       </div>

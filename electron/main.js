@@ -3,6 +3,8 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs/promises'
 import { scanFiles, analyzeDuplicates, executePlan } from './fs.js'
+import { appendEntry, clearAll, readRecent } from './agent/ledger.js'
+import { randomUUID } from 'crypto'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -87,4 +89,27 @@ ipcMain.handle('open-report-folder', async (_event, reportPath) => {
   const dir = path.dirname(reportPath)
   await fs.mkdir(dir, { recursive: true })
   return shell.openPath(dir)
+})
+
+ipcMain.handle('activity:getRecent', async (_event, limit = 50) => {
+  return readRecent(limit)
+})
+
+ipcMain.handle('activity:clear', async () => {
+  await clearAll()
+  return true
+})
+
+ipcMain.handle('activity:addTestEntry', async () => {
+  const entry = {
+    id: randomUUID(),
+    ts: Date.now(),
+    kind: 'event',
+    title: 'Test activity event',
+    path: '/tmp/example.txt',
+    status: 'info',
+    meta: { source: 'manual' }
+  }
+  await appendEntry(entry)
+  return entry
 })

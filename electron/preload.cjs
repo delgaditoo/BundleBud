@@ -7,5 +7,8 @@ contextBridge.exposeInMainWorld('api', {
   executePlan: (plan) => ipcRenderer.invoke('execute-plan', plan),
   revealInFinder: (targetPath) => ipcRenderer.invoke('reveal-in-finder', targetPath),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
-  openReportFolder: (reportPath) => ipcRenderer.invoke('open-report-folder', reportPath)
+  openReportFolder: (reportPath) => ipcRenderer.invoke('open-report-folder', reportPath),
+  getActivity: (limit) => ipcRenderer.invoke('activity:getRecent', limit),
+  clearActivity: () => ipcRenderer.invoke('activity:clear'),
+  addTestActivity: () => ipcRenderer.invoke('activity:addTestEntry')
 })
