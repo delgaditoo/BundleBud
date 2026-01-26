@@ -6,7 +6,7 @@ import { scanFiles, analyzeDuplicates, executePlan } from './fs.js'
 import { appendEntry, clearAll, readRecent } from './agent/ledger.js'
 import { randomUUID } from 'crypto'
 import chokidar from 'chokidar'
-import { applyScreenshotRules } from './rules/screenshots.js'
+import { processFile } from './agent/processFile.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -15,7 +15,6 @@ let mainWindow
 let desktopWatcher = null
 let downloadsWatcher = null
 const downloadsInflight = new Map()
-const downloadsRecentLogs = new Map()
 
 function isDesktopWatcherRunning() {
   return Boolean(desktopWatcher)
@@ -44,78 +43,6 @@ function isDownloadsWatcherRunning() {
   return Boolean(downloadsWatcher)
 }
 
-async function waitUntilStable(filePath, { timeoutMs = 5000, intervalMs = 300 } = {}) {
-  const start = Date.now()
-  let previousSize = null
-  while (Date.now() - start < timeoutMs) {
-    let firstSize
-    try {
-      const stat = await fs.stat(filePath)
-      if (!stat.isFile()) return { stable: false, size: 0 }
-      firstSize = stat.size
-    } catch {
-      return { stable: false, size: 0 }
-    }
-    if (previousSize !== null && firstSize === previousSize) {
-      return { stable: true, size: firstSize }
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs))
-    let secondSize
-    try {
-      const stat = await fs.stat(filePath)
-      if (!stat.isFile()) return { stable: false, size: 0 }
-      secondSize = stat.size
-    } catch {
-      return { stable: false, size: 0 }
-    }
-    if (firstSize === secondSize) {
-      return { stable: true, size: secondSize }
-    }
-    previousSize = secondSize
-  }
-  return { stable: false, size: 0 }
-}
-
-async function isFileStable(filePath, timeoutMs = 15000, intervalMs = 800) {
-  const start = Date.now()
-  let previousSize = null
-  while (Date.now() - start < timeoutMs) {
-    let firstSize
-    try {
-      const stat = await fs.stat(filePath)
-      if (!stat.isFile()) return false
-      firstSize = stat.size
-    } catch {
-      return false
-    }
-    if (previousSize !== null && firstSize === previousSize) {
-      return true
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs))
-    let secondSize
-    try {
-      const stat = await fs.stat(filePath)
-      if (!stat.isFile()) return false
-      secondSize = stat.size
-    } catch {
-      return false
-    }
-    if (firstSize === secondSize) {
-      return true
-    }
-    previousSize = secondSize
-  }
-  return false
-}
-
-function shouldLogDownload(filePath) {
-  const now = Date.now()
-  const lastLogged = downloadsRecentLogs.get(filePath) || 0
-  if (now - lastLogged < 5000) return false
-  downloadsRecentLogs.set(filePath, now)
-  return true
-}
-
 async function startDownloadsWatcher() {
   if (downloadsWatcher) return { running: true }
   if (process.platform !== 'darwin') return { running: false }
@@ -132,20 +59,7 @@ async function startDownloadsWatcher() {
     if (downloadsInflight.has(filePath)) return
     downloadsInflight.set(filePath, true)
     try {
-      const stable = await isFileStable(filePath)
-      if (!stable) return
-      if (!shouldLogDownload(filePath)) return
-      await applyScreenshotRules(filePath, { source: 'downloads-watcher' })
-      const entry = {
-        id: randomUUID(),
-        ts: Date.now(),
-        kind: 'event',
-        title: 'Download completed',
-        path: filePath,
-        status: 'info',
-        meta: { source: 'downloads-watcher', eventType: 'stable' }
-      }
-      await appendEntry(entry)
+      await processFile(filePath, 'downloads')
     } catch (err) {
       console.error('Failed to append downloads watcher entry', err)
     } finally {
@@ -167,7 +81,6 @@ async function stopDownloadsWatcher() {
   await downloadsWatcher.close()
   downloadsWatcher = null
   downloadsInflight.clear()
-  downloadsRecentLogs.clear()
   return { running: false }
 }
 async function startDesktopWatcher() {
@@ -181,42 +94,17 @@ async function startDesktopWatcher() {
     ignored: (targetPath) => shouldIgnoreDesktopFile(targetPath)
   })
 
-  const handleDesktopCandidate = async (filePath, eventType) => {
+  const handleDesktopCandidate = async (filePath) => {
     if (shouldIgnoreDesktopFile(filePath)) return
     try {
-      if (eventType === 'add') {
-        await appendEntry({
-          id: randomUUID(),
-          ts: Date.now(),
-          kind: 'event',
-          title: 'File detected',
-          path: filePath,
-          status: 'info',
-          meta: { source: 'desktop-watcher', eventType: 'add' }
-        })
-      }
-      const result = await waitUntilStable(filePath)
-      if (!result.stable) return
-      await appendEntry({
-        id: randomUUID(),
-        ts: Date.now(),
-        kind: 'event',
-        title: 'File stable',
-        path: filePath,
-        status: 'info',
-        meta: {
-          name: path.basename(filePath),
-          size: result.size
-        }
-      })
-      await applyScreenshotRules(filePath, { source: 'desktop-watcher' })
+      await processFile(filePath, 'desktop')
     } catch (err) {
       console.error('Failed to append desktop watcher entry', err)
     }
   }
 
-  desktopWatcher.on('add', (filePath) => handleDesktopCandidate(filePath, 'add'))
-  desktopWatcher.on('change', (filePath) => handleDesktopCandidate(filePath, 'change'))
+  desktopWatcher.on('add', (filePath) => handleDesktopCandidate(filePath))
+  desktopWatcher.on('change', (filePath) => handleDesktopCandidate(filePath))
 
   desktopWatcher.on('error', (err) => {
     console.error('Desktop watcher error', err)
