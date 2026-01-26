@@ -6,6 +6,7 @@ import { scanFiles, analyzeDuplicates, executePlan } from './fs.js'
 import { appendEntry, clearAll, readRecent } from './agent/ledger.js'
 import { randomUUID } from 'crypto'
 import chokidar from 'chokidar'
+import { applyScreenshotRules } from './rules/screenshots.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -41,6 +42,38 @@ function shouldIgnoreDownloadsFile(targetPath) {
 
 function isDownloadsWatcherRunning() {
   return Boolean(downloadsWatcher)
+}
+
+async function waitUntilStable(filePath, { timeoutMs = 5000, intervalMs = 300 } = {}) {
+  const start = Date.now()
+  let previousSize = null
+  while (Date.now() - start < timeoutMs) {
+    let firstSize
+    try {
+      const stat = await fs.stat(filePath)
+      if (!stat.isFile()) return { stable: false, size: 0 }
+      firstSize = stat.size
+    } catch {
+      return { stable: false, size: 0 }
+    }
+    if (previousSize !== null && firstSize === previousSize) {
+      return { stable: true, size: firstSize }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    let secondSize
+    try {
+      const stat = await fs.stat(filePath)
+      if (!stat.isFile()) return { stable: false, size: 0 }
+      secondSize = stat.size
+    } catch {
+      return { stable: false, size: 0 }
+    }
+    if (firstSize === secondSize) {
+      return { stable: true, size: secondSize }
+    }
+    previousSize = secondSize
+  }
+  return { stable: false, size: 0 }
 }
 
 async function isFileStable(filePath, timeoutMs = 15000, intervalMs = 800) {
@@ -102,6 +135,7 @@ async function startDownloadsWatcher() {
       const stable = await isFileStable(filePath)
       if (!stable) return
       if (!shouldLogDownload(filePath)) return
+      await applyScreenshotRules(filePath, { source: 'downloads-watcher' })
       const entry = {
         id: randomUUID(),
         ts: Date.now(),
@@ -147,23 +181,42 @@ async function startDesktopWatcher() {
     ignored: (targetPath) => shouldIgnoreDesktopFile(targetPath)
   })
 
-  desktopWatcher.on('add', async (filePath) => {
+  const handleDesktopCandidate = async (filePath, eventType) => {
     if (shouldIgnoreDesktopFile(filePath)) return
-    const entry = {
-      id: randomUUID(),
-      ts: Date.now(),
-      kind: 'event',
-      title: 'File detected',
-      path: filePath,
-      status: 'info',
-      meta: { source: 'desktop-watcher', eventType: 'add' }
-    }
     try {
-      await appendEntry(entry)
+      if (eventType === 'add') {
+        await appendEntry({
+          id: randomUUID(),
+          ts: Date.now(),
+          kind: 'event',
+          title: 'File detected',
+          path: filePath,
+          status: 'info',
+          meta: { source: 'desktop-watcher', eventType: 'add' }
+        })
+      }
+      const result = await waitUntilStable(filePath)
+      if (!result.stable) return
+      await appendEntry({
+        id: randomUUID(),
+        ts: Date.now(),
+        kind: 'event',
+        title: 'File stable',
+        path: filePath,
+        status: 'info',
+        meta: {
+          name: path.basename(filePath),
+          size: result.size
+        }
+      })
+      await applyScreenshotRules(filePath, { source: 'desktop-watcher' })
     } catch (err) {
       console.error('Failed to append desktop watcher entry', err)
     }
-  })
+  }
+
+  desktopWatcher.on('add', (filePath) => handleDesktopCandidate(filePath, 'add'))
+  desktopWatcher.on('change', (filePath) => handleDesktopCandidate(filePath, 'change'))
 
   desktopWatcher.on('error', (err) => {
     console.error('Desktop watcher error', err)
