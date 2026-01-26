@@ -1,0 +1,40 @@
+{
+  "name": "ai-file-organizer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 env -u ELECTRON_RUN_AS_NODE electron .\"",
+    "build": "vite build && electron-builder",
+    "preview": "vite preview",
+    "electron": "env -u ELECTRON_RUN_AS_NODE electron ."
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "electron": "^30.1.0",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.4.45",
+    "tailwindcss": "^3.4.10",
+    "vite": "^5.4.8",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.ai.fileorganizer",
+    "productName": "AI File Organizer",
+    "files": [
+      "dist",
+      "electron",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg"
+    }
+  }
+}
