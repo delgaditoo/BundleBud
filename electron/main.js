@@ -12,6 +12,9 @@ const __dirname = path.dirname(__filename)
 
 let mainWindow
 let desktopWatcher = null
+let downloadsWatcher = null
+const downloadsInflight = new Map()
+const downloadsRecentLogs = new Map()
 
 function isDesktopWatcherRunning() {
   return Boolean(desktopWatcher)
@@ -23,6 +26,116 @@ function shouldIgnoreDesktopFile(targetPath) {
   return base.startsWith('.')
 }
 
+function shouldIgnoreDownloadsFile(targetPath) {
+  const base = path.basename(targetPath)
+  if (base === '.DS_Store') return true
+  if (base.startsWith('.')) return true
+  const lower = base.toLowerCase()
+  return (
+    lower.endsWith('.crdownload') ||
+    lower.endsWith('.download') ||
+    lower.endsWith('.tmp') ||
+    lower.endsWith('.part')
+  )
+}
+
+function isDownloadsWatcherRunning() {
+  return Boolean(downloadsWatcher)
+}
+
+async function isFileStable(filePath, timeoutMs = 15000, intervalMs = 800) {
+  const start = Date.now()
+  let previousSize = null
+  while (Date.now() - start < timeoutMs) {
+    let firstSize
+    try {
+      const stat = await fs.stat(filePath)
+      if (!stat.isFile()) return false
+      firstSize = stat.size
+    } catch {
+      return false
+    }
+    if (previousSize !== null && firstSize === previousSize) {
+      return true
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    let secondSize
+    try {
+      const stat = await fs.stat(filePath)
+      if (!stat.isFile()) return false
+      secondSize = stat.size
+    } catch {
+      return false
+    }
+    if (firstSize === secondSize) {
+      return true
+    }
+    previousSize = secondSize
+  }
+  return false
+}
+
+function shouldLogDownload(filePath) {
+  const now = Date.now()
+  const lastLogged = downloadsRecentLogs.get(filePath) || 0
+  if (now - lastLogged < 5000) return false
+  downloadsRecentLogs.set(filePath, now)
+  return true
+}
+
+async function startDownloadsWatcher() {
+  if (downloadsWatcher) return { running: true }
+  if (process.platform !== 'darwin') return { running: false }
+
+  const downloadsPath = app.getPath('downloads')
+  downloadsWatcher = chokidar.watch(downloadsPath, {
+    ignoreInitial: true,
+    depth: 0,
+    ignored: (targetPath) => shouldIgnoreDownloadsFile(targetPath)
+  })
+
+  const handleCandidate = async (filePath) => {
+    if (shouldIgnoreDownloadsFile(filePath)) return
+    if (downloadsInflight.has(filePath)) return
+    downloadsInflight.set(filePath, true)
+    try {
+      const stable = await isFileStable(filePath)
+      if (!stable) return
+      if (!shouldLogDownload(filePath)) return
+      const entry = {
+        id: randomUUID(),
+        ts: Date.now(),
+        kind: 'event',
+        title: 'Download completed',
+        path: filePath,
+        status: 'info',
+        meta: { source: 'downloads-watcher', eventType: 'stable' }
+      }
+      await appendEntry(entry)
+    } catch (err) {
+      console.error('Failed to append downloads watcher entry', err)
+    } finally {
+      downloadsInflight.delete(filePath)
+    }
+  }
+
+  downloadsWatcher.on('add', handleCandidate)
+  downloadsWatcher.on('change', handleCandidate)
+  downloadsWatcher.on('error', (err) => {
+    console.error('Downloads watcher error', err)
+  })
+
+  return { running: true }
+}
+
+async function stopDownloadsWatcher() {
+  if (!downloadsWatcher) return { running: false }
+  await downloadsWatcher.close()
+  downloadsWatcher = null
+  downloadsInflight.clear()
+  downloadsRecentLogs.clear()
+  return { running: false }
+}
 async function startDesktopWatcher() {
   if (desktopWatcher) return { running: true }
   if (process.platform !== 'darwin') return { running: false }
@@ -105,6 +218,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', async () => {
   await stopDesktopWatcher()
+  await stopDownloadsWatcher()
 })
 
 ipcMain.handle('select-folder', async () => {
@@ -183,4 +297,16 @@ ipcMain.handle('desktop-watcher:stop', async () => {
 
 ipcMain.handle('desktop-watcher:status', async () => {
   return { running: isDesktopWatcherRunning() }
+})
+
+ipcMain.handle('downloads-watcher:start', async () => {
+  return startDownloadsWatcher()
+})
+
+ipcMain.handle('downloads-watcher:stop', async () => {
+  return stopDownloadsWatcher()
+})
+
+ipcMain.handle('downloads-watcher:status', async () => {
+  return { running: isDownloadsWatcherRunning() }
 })

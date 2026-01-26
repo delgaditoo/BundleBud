@@ -35,7 +35,9 @@ export default function App() {
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
   const [watcherStatus, setWatcherStatus] = useState({ running: false })
+  const [downloadsWatcherStatus, setDownloadsWatcherStatus] = useState({ running: false })
   const [watcherBusy, setWatcherBusy] = useState(false)
+  const [downloadsWatcherBusy, setDownloadsWatcherBusy] = useState(false)
 
   const suggestions = analysis.suggestions || []
 
@@ -43,6 +45,7 @@ export default function App() {
     if (view === 'activity') {
       loadActivity(50)
       loadWatcherStatus()
+      loadDownloadsWatcherStatus()
     }
   }, [view])
 
@@ -81,6 +84,25 @@ export default function App() {
     }
   }
 
+  async function loadDownloadsWatcherStatus() {
+    setDownloadsWatcherBusy(true)
+    try {
+      if (!api?.getDownloadsWatcherStatus) {
+        throw new Error('Downloads watcher bridge unavailable.')
+      }
+      const status = await api.getDownloadsWatcherStatus()
+      if (typeof status?.running === 'boolean') {
+        setDownloadsWatcherStatus(status)
+      } else {
+        setDownloadsWatcherStatus({ running: false })
+      }
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to load downloads watcher status.')
+    } finally {
+      setDownloadsWatcherBusy(false)
+    }
+  }
+
   async function handleToggleWatcher() {
     setActivityError('')
     setWatcherBusy(true)
@@ -98,6 +120,26 @@ export default function App() {
       setActivityError(err?.message || 'Failed to toggle watcher.')
     } finally {
       setWatcherBusy(false)
+    }
+  }
+
+  async function handleToggleDownloadsWatcher() {
+    setActivityError('')
+    setDownloadsWatcherBusy(true)
+    try {
+      if (!api?.startDownloadsWatcher || !api?.stopDownloadsWatcher) {
+        throw new Error('Downloads watcher bridge unavailable.')
+      }
+      if (downloadsWatcherStatus.running) {
+        await api.stopDownloadsWatcher()
+      } else {
+        await api.startDownloadsWatcher()
+      }
+      await loadDownloadsWatcherStatus()
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to toggle downloads watcher.')
+    } finally {
+      setDownloadsWatcherBusy(false)
     }
   }
 
@@ -251,6 +293,22 @@ export default function App() {
               disabled={watcherBusy}
             >
               {watcherStatus.running ? 'Off' : 'On'}
+            </button>
+          </section>
+
+          <section className="section watcher-panel">
+            <div>
+              <div className="label">Downloads Watcher</div>
+              <div className="muted">
+                Status: {downloadsWatcherStatus.running ? 'Running' : 'Stopped'}
+              </div>
+            </div>
+            <button
+              className={downloadsWatcherStatus.running ? 'ghost' : 'secondary'}
+              onClick={handleToggleDownloadsWatcher}
+              disabled={downloadsWatcherBusy}
+            >
+              {downloadsWatcherStatus.running ? 'Off' : 'On'}
             </button>
           </section>
 

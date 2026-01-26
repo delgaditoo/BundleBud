@@ -13,5 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   addTestActivity: () => ipcRenderer.invoke('activity:addTestEntry'),
   startDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:start'),
   stopDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:stop'),
-  getDesktopWatcherStatus: () => ipcRenderer.invoke('desktop-watcher:status')
+  getDesktopWatcherStatus: () => ipcRenderer.invoke('desktop-watcher:status'),
+  startDownloadsWatcher: () => ipcRenderer.invoke('downloads-watcher:start'),
+  stopDownloadsWatcher: () => ipcRenderer.invoke('downloads-watcher:stop'),
+  getDownloadsWatcherStatus: () => ipcRenderer.invoke('downloads-watcher:status')
 })
