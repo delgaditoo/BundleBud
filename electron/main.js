@@ -232,6 +232,35 @@ async function stopDesktopWatcher() {
   return { running: false }
 }
 
+async function getLastMoveAction(limit = 300) {
+  const entries = await readRecent(limit)
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i]
+    if (entry?.kind !== 'action') continue
+    if (entry?.meta?.from && entry?.meta?.to) {
+      return entry
+    }
+  }
+  return null
+}
+
+async function ensureUniqueDestination(destPath) {
+  const ext = path.extname(destPath)
+  const base = path.basename(destPath, ext)
+  const dir = path.dirname(destPath)
+  let candidate = destPath
+  let counter = 1
+  while (true) {
+    try {
+      await fs.access(candidate)
+      candidate = path.join(dir, `${base} (${counter})${ext}`)
+      counter += 1
+    } catch {
+      return candidate
+    }
+  }
+}
+
 function getDevServerUrl() {
   return process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
 }
@@ -362,4 +391,59 @@ ipcMain.handle('downloads-watcher:stop', async () => {
 
 ipcMain.handle('downloads-watcher:status', async () => {
   return { running: isDownloadsWatcherRunning() }
+})
+
+ipcMain.handle('activity:canUndo', async () => {
+  const lastMove = await getLastMoveAction()
+  if (!lastMove) return { canUndo: false }
+  return { canUndo: true, lastTitle: lastMove.title }
+})
+
+ipcMain.handle('activity:undoLastMove', async () => {
+  const lastMove = await getLastMoveAction()
+  if (!lastMove) return { ok: false, error: 'No move action found.' }
+
+  const fromPath = lastMove.meta?.from
+  const toPath = lastMove.meta?.to
+  const ruleId = lastMove.meta?.ruleId
+  const source = lastMove.meta?.source
+
+  if (!fromPath || !toPath) {
+    return { ok: false, error: 'Move metadata missing.' }
+  }
+
+  let finalDestination = fromPath
+  let status = 'success'
+  let errorMessage = ''
+
+  try {
+    await fs.mkdir(path.dirname(fromPath), { recursive: true })
+    finalDestination = await ensureUniqueDestination(fromPath)
+    await fs.rename(toPath, finalDestination)
+  } catch (err) {
+    status = 'error'
+    errorMessage = err?.message || String(err)
+  }
+
+  const undoEntry = {
+    id: randomUUID(),
+    ts: Date.now(),
+    kind: 'action',
+    title: 'Undo performed',
+    path: fromPath,
+    status,
+    meta: {
+      from: toPath,
+      to: finalDestination,
+      ruleId,
+      source
+    }
+  }
+
+  if (status === 'error') {
+    undoEntry.meta.error = errorMessage
+  }
+
+  await appendEntry(undoEntry)
+  return { ok: status === 'success', error: errorMessage || null }
 })

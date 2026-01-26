@@ -34,6 +34,8 @@ export default function App() {
   const [activityEntries, setActivityEntries] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
+  const [undoState, setUndoState] = useState({ canUndo: false, lastTitle: '' })
+  const [undoBusy, setUndoBusy] = useState(false)
   const [watcherStatus, setWatcherStatus] = useState({ running: false })
   const [downloadsWatcherStatus, setDownloadsWatcherStatus] = useState({ running: false })
   const [watcherBusy, setWatcherBusy] = useState(false)
@@ -44,6 +46,7 @@ export default function App() {
   useEffect(() => {
     if (view === 'activity') {
       loadActivity(50)
+      loadUndoState()
       loadWatcherStatus()
       loadDownloadsWatcherStatus()
     }
@@ -62,6 +65,39 @@ export default function App() {
       setActivityError(err?.message || 'Failed to load activity.')
     } finally {
       setActivityLoading(false)
+    }
+  }
+
+  async function loadUndoState() {
+    try {
+      if (!api?.canUndo) {
+        setUndoState({ canUndo: false, lastTitle: '' })
+        return
+      }
+      const result = await api.canUndo()
+      setUndoState({
+        canUndo: Boolean(result?.canUndo),
+        lastTitle: result?.lastTitle || ''
+      })
+    } catch (err) {
+      setUndoState({ canUndo: false, lastTitle: '' })
+    }
+  }
+
+  async function handleUndo() {
+    setActivityError('')
+    setUndoBusy(true)
+    try {
+      if (!api?.undoLastMove) {
+        throw new Error('Undo bridge unavailable.')
+      }
+      await api.undoLastMove()
+      await loadActivity(50)
+      await loadUndoState()
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to undo last move.')
+    } finally {
+      setUndoBusy(false)
     }
   }
 
@@ -313,6 +349,13 @@ export default function App() {
           </section>
 
           <section className="section activity-controls">
+            <button
+              className="secondary"
+              onClick={handleUndo}
+              disabled={undoBusy || !undoState.canUndo}
+            >
+              Undo last move
+            </button>
             <button className="secondary" onClick={handleAddTestActivity} disabled={activityLoading}>
               Add test event
             </button>
