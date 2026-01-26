@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   addTestActivity: () => ipcRenderer.invoke('activity:addTestEntry'),
   canUndo: () => ipcRenderer.invoke('activity:canUndo'),
   undoLastMove: () => ipcRenderer.invoke('activity:undoLastMove'),
+  getDashboardStats: () => ipcRenderer.invoke('dashboard:getStats'),
   startDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:start'),
   stopDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:stop'),
   getDesktopWatcherStatus: () => ipcRenderer.invoke('desktop-watcher:status'),

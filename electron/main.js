@@ -7,6 +7,7 @@ import { appendEntry, clearAll, readRecent } from './agent/ledger.js'
 import { randomUUID } from 'crypto'
 import chokidar from 'chokidar'
 import { processFile } from './agent/processFile.js'
+import { getDashboardStats } from './agent/stats.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -334,4 +335,15 @@ ipcMain.handle('activity:undoLastMove', async () => {
 
   await appendEntry(undoEntry)
   return { ok: status === 'success', error: errorMessage || null }
+})
+
+ipcMain.handle('dashboard:getStats', async () => {
+  const stats = await getDashboardStats()
+  return {
+    ...stats,
+    watcherStatus: {
+      desktop: isDesktopWatcherRunning(),
+      downloads: isDownloadsWatcherRunning()
+    }
+  }
 })

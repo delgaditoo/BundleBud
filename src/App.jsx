@@ -19,6 +19,13 @@ function formatLocalTime(ts) {
   return new Date(ts).toLocaleString()
 }
 
+function shortenPath(value, maxLength = 64) {
+  if (!value || value.length <= maxLength) return value || '—'
+  const head = value.slice(0, Math.floor(maxLength * 0.6))
+  const tail = value.slice(-Math.floor(maxLength * 0.3))
+  return `${head}…${tail}`
+}
+
 export default function App() {
   const api = window.api
   const [view, setView] = useState('organizer')
@@ -40,6 +47,8 @@ export default function App() {
   const [downloadsWatcherStatus, setDownloadsWatcherStatus] = useState({ running: false })
   const [watcherBusy, setWatcherBusy] = useState(false)
   const [downloadsWatcherBusy, setDownloadsWatcherBusy] = useState(false)
+  const [dashboardStats, setDashboardStats] = useState(null)
+  const [dashboardLoading, setDashboardLoading] = useState(false)
 
   const suggestions = analysis.suggestions || []
 
@@ -49,6 +58,10 @@ export default function App() {
       loadUndoState()
       loadWatcherStatus()
       loadDownloadsWatcherStatus()
+    }
+    if (view === 'dashboard') {
+      loadDashboard()
+      loadUndoState()
     }
   }, [view])
 
@@ -81,6 +94,21 @@ export default function App() {
       })
     } catch (err) {
       setUndoState({ canUndo: false, lastTitle: '' })
+    }
+  }
+
+  async function loadDashboard() {
+    setDashboardLoading(true)
+    try {
+      if (!api?.getDashboardStats) {
+        throw new Error('Dashboard bridge unavailable.')
+      }
+      const stats = await api.getDashboardStats()
+      setDashboardStats(stats)
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to load dashboard.')
+    } finally {
+      setDashboardLoading(false)
     }
   }
 
@@ -300,6 +328,136 @@ export default function App() {
     [selected]
   )
 
+  if (view === 'dashboard') {
+    const today = dashboardStats?.today || { actions: 0, movedFiles: 0, movedBytes: 0 }
+    const last7Days = dashboardStats?.last7Days || { actions: 0, movedFiles: 0, movedBytes: 0 }
+    const topRules = dashboardStats?.topRulesToday || []
+    const recentActions = dashboardStats?.recentActions || []
+    const watcher = dashboardStats?.watcherStatus || { desktop: false, downloads: false }
+
+    return (
+      <div className="page">
+        <div className="card dashboard">
+          <header className="header">
+            <div>
+              <h1>BundleBud Dashboard</h1>
+              <p>Quick insights from your recent activity.</p>
+            </div>
+            <div className="header-actions">
+              <button className="ghost" onClick={() => setView('organizer')}>
+                Back to Organizer
+              </button>
+            </div>
+          </header>
+
+          {dashboardLoading ? <p className="muted">Loading dashboard…</p> : null}
+
+          <section className="dashboard-grid">
+            <div className="stat-card">
+              <div className="stat-label">Today · Actions</div>
+              <div className="stat-value">{today.actions}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Today · Files moved</div>
+              <div className="stat-value">{today.movedFiles}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Today · Space organized</div>
+              <div className="stat-value">{formatBytes(today.movedBytes)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Last 7 days · Actions</div>
+              <div className="stat-value">{last7Days.actions}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Last 7 days · Files moved</div>
+              <div className="stat-value">{last7Days.movedFiles}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Last 7 days · Space organized</div>
+              <div className="stat-value">{formatBytes(last7Days.movedBytes)}</div>
+            </div>
+          </section>
+
+          <section className="dashboard-columns">
+            <div className="dashboard-panel">
+              <div className="panel-title">Top rules today</div>
+              {topRules.length ? (
+                <div className="panel-list">
+                  {topRules.map((item) => (
+                    <div className="panel-row" key={item.ruleId}>
+                      <span className="mono">{item.ruleId}</span>
+                      <span>{item.count}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">No rules triggered yet.</p>
+              )}
+            </div>
+
+            <div className="dashboard-panel">
+              <div className="panel-title">Watchers</div>
+              <div className="panel-list">
+                <div className="panel-row">
+                  <span>Desktop</span>
+                  <span className={watcher.desktop ? 'status-on' : 'status-off'}>
+                    {watcher.desktop ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+                <div className="panel-row">
+                  <span>Downloads</span>
+                  <span className={watcher.downloads ? 'status-on' : 'status-off'}>
+                    {watcher.downloads ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="dashboard-panel">
+            <div className="panel-title">Recent activity</div>
+            {recentActions.length ? (
+              <div className="panel-list">
+                {recentActions.map((entry) => (
+                  <div className="panel-row panel-row-stacked" key={`${entry.ts}-${entry.from || ''}`}>
+                    <div className="row-top">
+                      <span className={`badge badge-${entry.status || 'info'}`}>
+                        {entry.status || 'info'}
+                      </span>
+                      <span className="mono">{entry.ruleId || '—'}</span>
+                      <span className="muted">{formatLocalTime(entry.ts)}</span>
+                    </div>
+                    <div className="row-bottom mono">
+                      {entry.from
+                        ? `${shortenPath(entry.from)} → ${shortenPath(entry.to)}`
+                        : entry.title}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">No recent actions.</p>
+            )}
+          </section>
+
+          <footer className="footer">
+            <button className="ghost" onClick={() => setView('activity')}>
+              Open Activity Ledger
+            </button>
+            <button
+              className="secondary"
+              onClick={handleUndo}
+              disabled={undoBusy || !undoState.canUndo}
+            >
+              Undo last move
+            </button>
+          </footer>
+        </div>
+      </div>
+    )
+  }
+
   if (view === 'activity') {
     return (
       <div className="page">
@@ -310,6 +468,9 @@ export default function App() {
               <p>Local-only flight recorder for BundleBud.</p>
             </div>
             <div className="header-actions">
+              <button className="ghost" onClick={() => setView('dashboard')}>
+                Dashboard
+              </button>
               <button className="ghost" onClick={() => setView('organizer')}>
                 Back to Organizer
               </button>
@@ -412,6 +573,9 @@ export default function App() {
               <p>Duplicate finder with a safe archive.</p>
             </div>
             <div className="header-actions">
+              <button className="ghost" onClick={() => setView('dashboard')}>
+                Dashboard
+              </button>
               <button className="ghost" onClick={() => setView('activity')}>
                 Activity
               </button>
@@ -487,6 +651,9 @@ export default function App() {
               <p>Archives duplicates, trash remains optional.</p>
             </div>
             <div className="header-actions">
+              <button className="ghost" onClick={() => setView('dashboard')}>
+                Dashboard
+              </button>
               <button className="ghost" onClick={() => setStep('setup')}>
                 Back
               </button>
@@ -587,17 +754,20 @@ export default function App() {
   return (
     <div className="page">
       <div className="card">
-        <header className="header">
-          <div>
-            <h1>Done</h1>
-            <p>The run has been logged.</p>
-          </div>
-          <div className="header-actions">
-            <button className="ghost" onClick={() => setView('activity')}>
-              Activity
-            </button>
-          </div>
-        </header>
+          <header className="header">
+            <div>
+              <h1>Done</h1>
+              <p>The run has been logged.</p>
+            </div>
+            <div className="header-actions">
+              <button className="ghost" onClick={() => setView('dashboard')}>
+                Dashboard
+              </button>
+              <button className="ghost" onClick={() => setView('activity')}>
+                Activity
+              </button>
+            </div>
+          </header>
 
         <section className="section">
           <div className="summary">
