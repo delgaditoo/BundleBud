@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('api', {
   listReviewQueue: () => ipcRenderer.invoke('automation:listQueue'),
   listRules: () => ipcRenderer.invoke('automation:listRules'),
   saveRules: (rules: any[]) => ipcRenderer.invoke('automation:saveRules', rules),
+  listArchiveItems: () => ipcRenderer.invoke('archive:list'),
+  restoreArchiveItem: (itemId: string) => ipcRenderer.invoke('archive:restore', itemId),
   applyProposedAction: (actionId: string) => ipcRenderer.invoke('automation:apply', actionId),
   rejectProposedAction: (actionId: string) => ipcRenderer.invoke('automation:reject', actionId),
   startDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:start'),

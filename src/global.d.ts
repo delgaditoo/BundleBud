@@ -21,6 +21,8 @@ declare global {
       listReviewQueue: () => Promise<any[]>
       listRules: () => Promise<any[]>
       saveRules: (rules: any[]) => Promise<any[]>
+      listArchiveItems: () => Promise<any[]>
+      restoreArchiveItem: (itemId: string) => Promise<any>
       applyProposedAction: (actionId: string) => Promise<any>
       rejectProposedAction: (actionId: string) => Promise<any>
       startDesktopWatcher: () => Promise<{ running: boolean }>

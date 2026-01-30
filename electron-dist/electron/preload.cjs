@@ -20,6 +20,8 @@ electron_1.contextBridge.exposeInMainWorld('api', {
     listReviewQueue: () => electron_1.ipcRenderer.invoke('automation:listQueue'),
     listRules: () => electron_1.ipcRenderer.invoke('automation:listRules'),
     saveRules: (rules) => electron_1.ipcRenderer.invoke('automation:saveRules', rules),
+    listArchiveItems: () => electron_1.ipcRenderer.invoke('archive:list'),
+    restoreArchiveItem: (itemId) => electron_1.ipcRenderer.invoke('archive:restore', itemId),
     applyProposedAction: (actionId) => electron_1.ipcRenderer.invoke('automation:apply', actionId),
     rejectProposedAction: (actionId) => electron_1.ipcRenderer.invoke('automation:reject', actionId),
     startDesktopWatcher: () => electron_1.ipcRenderer.invoke('desktop-watcher:start'),

@@ -131,6 +131,9 @@ export default function App() {
   const [rulesError, setRulesError] = useState('')
   const [selectedRuleId, setSelectedRuleId] = useState(null)
   const [rulePreview, setRulePreview] = useState({ matches: [], error: '', ran: false })
+  const [archiveItems, setArchiveItems] = useState([])
+  const [archiveLoading, setArchiveLoading] = useState(false)
+  const [archiveError, setArchiveError] = useState('')
 
   const suggestions = analysis.suggestions || []
   const smartGroups = useMemo(() => buildSmartGroups(scanResult.files || []), [scanResult.files])
@@ -154,6 +157,9 @@ export default function App() {
     if (view === 'rules') {
       loadRules()
       loadAutomationMode()
+    }
+    if (view === 'archive') {
+      loadArchive()
     }
     if (view === 'system') {
       loadSystemInfo()
@@ -298,6 +304,36 @@ export default function App() {
       await api.saveRules(nextRules)
     } catch (err) {
       setRulesError(err?.message || 'Failed to save rules.')
+    }
+  }
+
+  async function loadArchive() {
+    setArchiveError('')
+    setArchiveLoading(true)
+    try {
+      if (!api?.listArchiveItems) {
+        throw new Error('Archive bridge unavailable. Please restart the app.')
+      }
+      const items = await api.listArchiveItems()
+      setArchiveItems(Array.isArray(items) ? items : [])
+    } catch (err) {
+      setArchiveError(err?.message || 'Failed to load archive.')
+    } finally {
+      setArchiveLoading(false)
+    }
+  }
+
+  async function handleRestoreArchive(itemId) {
+    setArchiveError('')
+    try {
+      if (!api?.restoreArchiveItem) {
+        throw new Error('Restore bridge unavailable. Please restart the app.')
+      }
+      await api.restoreArchiveItem(itemId)
+      await loadArchive()
+      await loadActivity(50)
+    } catch (err) {
+      setArchiveError(err?.message || 'Failed to restore item.')
     }
   }
 
@@ -818,6 +854,7 @@ export default function App() {
     { id: 'dashboard', label: 'Dashboard', icon: <PiGauge size={18} /> },
     { id: 'review-queue', label: 'Review Queue', icon: <PiWrench size={18} /> },
     { id: 'rules', label: 'Rules', icon: <PiLightning size={18} /> },
+    { id: 'archive', label: 'Archive', icon: <PiHardDrive size={18} /> },
     { id: 'organizer', label: 'Cleaner', icon: <PiBroomBold size={18} /> },
     { id: 'activity', label: 'Activity Ledger', icon: <PiFolder size={18} /> },
     { id: 'system', label: 'System Settings', icon: <PiLaptop size={18} /> }
@@ -847,6 +884,13 @@ export default function App() {
         kicker: 'Automation',
         title: 'Rules',
         subtitle: 'Create, preview, and prioritize your rules.'
+      }
+    }
+    if (view === 'archive') {
+      return {
+        kicker: 'Automation',
+        title: 'Archive',
+        subtitle: 'Review archived items and restore safely.'
       }
     }
     if (view === 'activity') {
@@ -1272,6 +1316,67 @@ export default function App() {
             )}
           </div>
         </div>
+      </div>
+    )
+  }
+
+  if (view === 'archive') {
+    return renderShell(
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Archive</h2>
+          <p className="muted">Restore safely or open archived items in Finder.</p>
+        </div>
+
+        {archiveError ? <div className="error">{archiveError}</div> : null}
+        {archiveLoading ? <p className="muted">Loading archive…</p> : null}
+
+        {archiveItems.length ? (
+          <div className="archive-list">
+            {archiveItems.map((item) => (
+              <div className="archive-row" key={item.id}>
+                <div>
+                  <div className="archive-title">
+                    <span className="mono">{item.fileName || 'Unknown file'}</span>
+                    <span className={`status-tag ${item.status || 'archived'}`}>
+                      {item.status || 'archived'}
+                    </span>
+                  </div>
+                  <div className="archive-meta">
+                    <span className="muted">From:</span>
+                    <span className="mono">{shortenPath(item.fromPath)}</span>
+                  </div>
+                  <div className="archive-meta">
+                    <span className="muted">To:</span>
+                    <span className="mono">{shortenPath(item.toPath)}</span>
+                  </div>
+                  <div className="archive-meta">
+                    <span className="muted">When:</span>
+                    <span>{formatLocalTime(item.archivedAt)}</span>
+                  </div>
+                  <div className="archive-meta">
+                    <span className="muted">Rule:</span>
+                    <span className="mono">{item.ruleId || '—'}</span>
+                  </div>
+                </div>
+                <div className="archive-actions">
+                  <button className="ghost" onClick={() => api?.revealInFinder(item.toPath)}>
+                    Open in Finder
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={item.status !== 'archived'}
+                    onClick={() => handleRestoreArchive(item.id)}
+                  >
+                    Restore
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No archived items yet.</p>
+        )}
       </div>
     )
   }

@@ -572,6 +572,67 @@ h2 {
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
+.archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.archive-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+  gap: 16px;
+  align-items: start;
+  padding: 18px;
+  border-radius: 14px;
+  background: rgba(8, 12, 22, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.archive-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.archive-meta {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+  align-items: center;
+}
+
+.archive-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.status-tag {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+
+.status-tag.restored {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+}
+
+.status-tag.error {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fecaca;
+}
+
 .group-grid {
   display: grid;
   gap: 12px;
@@ -1057,6 +1118,10 @@ select {
   .activity-entry {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .archive-row {
+    grid-template-columns: 1fr;
   }
 
   .item {

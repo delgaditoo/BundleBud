@@ -3,6 +3,8 @@ import { createReadStream } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { app, shell } from 'electron';
+import { randomUUID } from 'crypto';
+import { appendArchiveItem } from './agent/archiveStore.js';
 const DEFAULT_EXCLUDES = new Set([
     'node_modules',
     '.git',
@@ -198,6 +200,20 @@ export async function executePlan(plan = {}) {
                         success: true,
                         fallback: 'trash_failed'
                     });
+                    try {
+                        await appendArchiveItem({
+                            id: randomUUID(),
+                            fileName: item.file || path.basename(item.path),
+                            fromPath: item.path,
+                            toPath: fallbackPath,
+                            archivedAt: Date.now(),
+                            ruleId: 'trash-fallback',
+                            status: 'archived'
+                        });
+                    }
+                    catch {
+                        // Ignore archive index errors for now.
+                    }
                     continue;
                 }
             }
@@ -209,6 +225,20 @@ export async function executePlan(plan = {}) {
                     : path.join(archiveRoot, item.relPath || path.basename(item.path));
                 await moveFileSafe(item.path, destination);
                 results.push({ file: item.file, action: 'move-to-archive', success: true });
+                try {
+                    await appendArchiveItem({
+                        id: randomUUID(),
+                        fileName: item.file || path.basename(item.path),
+                        fromPath: item.path,
+                        toPath: destination,
+                        archivedAt: Date.now(),
+                        ruleId: item.ruleId || 'duplicate-cleaner',
+                        status: 'archived'
+                    });
+                }
+                catch {
+                    // Ignore archive index errors for now.
+                }
             }
         }
         catch (error) {

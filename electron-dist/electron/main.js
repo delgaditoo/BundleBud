@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import chokidar from 'chokidar';
 import { processFile, executeMoveAction } from './agent/processFile.js';
 import { getDashboardStats } from './agent/stats.js';
+import { listArchiveItems, updateArchiveItem } from './agent/archiveStore.js';
 import { getAutomationMode, setAutomationMode, listReviewQueue, updateProposedAction, listRules, saveRules } from './agent/automationStore.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +20,38 @@ let desktopWatcher = null;
 let downloadsWatcher = null;
 const downloadsInflight = new Map();
 const execFileAsync = promisify(execFile);
+async function ensureUniqueDestination(destPath) {
+    const ext = path.extname(destPath);
+    const base = path.basename(destPath, ext);
+    const dir = path.dirname(destPath);
+    let candidate = destPath;
+    let counter = 2;
+    while (true) {
+        try {
+            await fs.access(candidate);
+            candidate = path.join(dir, `${base} (${counter})${ext}`);
+            counter += 1;
+        }
+        catch {
+            return candidate;
+        }
+    }
+}
+async function moveFileSafe(source, destination) {
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    try {
+        await fs.rename(source, destination);
+    }
+    catch (error) {
+        if (error.code === 'EXDEV') {
+            await fs.copyFile(source, destination);
+            await fs.unlink(source);
+        }
+        else {
+            throw error;
+        }
+    }
+}
 async function listExternalVolumes() {
     if (process.platform !== 'darwin')
         return [];
@@ -418,6 +451,50 @@ ipcMain.handle('automation:listRules', async () => {
 });
 ipcMain.handle('automation:saveRules', async (_event, rules) => {
     return saveRules(rules);
+});
+ipcMain.handle('archive:list', async () => {
+    return listArchiveItems();
+});
+ipcMain.handle('archive:restore', async (_event, itemId) => {
+    const items = await listArchiveItems();
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item)
+        return { ok: false, error: 'Archive item not found.' };
+    if (item.status !== 'archived')
+        return { ok: false, error: 'Item is not archived.' };
+    let finalDestination = item.fromPath;
+    let status = 'success';
+    let errorMessage = '';
+    try {
+        finalDestination = await ensureUniqueDestination(item.fromPath);
+        await moveFileSafe(item.toPath, finalDestination);
+    }
+    catch (err) {
+        status = 'error';
+        errorMessage = err?.message || String(err);
+    }
+    const updated = await updateArchiveItem(itemId, {
+        status: status === 'success' ? 'restored' : 'error',
+        restoredAt: Date.now(),
+        restoredPath: status === 'success' ? finalDestination : null,
+        error: errorMessage
+    });
+    await appendEntry({
+        id: randomUUID(),
+        ts: Date.now(),
+        kind: 'action',
+        title: 'Restored file',
+        path: item.fromPath,
+        status: status === 'success' ? 'success' : 'error',
+        meta: {
+            action: 'restore',
+            ruleId: item.ruleId || null,
+            from: item.toPath,
+            to: finalDestination,
+            error: errorMessage || null
+        }
+    });
+    return { ok: status === 'success', action: updated, error: errorMessage || null };
 });
 ipcMain.handle('automation:apply', async (_event, actionId) => {
     const item = await findQueuedAction(actionId);

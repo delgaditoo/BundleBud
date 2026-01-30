@@ -2,6 +2,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { appendEntry } from './ledger.js'
+import { appendArchiveItem, isArchivePath } from './archiveStore.js'
 import { applyRules } from '../rules/index.js'
 import { getAutomationMode, enqueueProposedAction } from './automationStore.js'
 
@@ -173,6 +174,22 @@ export async function executeMoveAction(proposedAction: ProposedAction) {
   }
 
   await appendEntry(actionEntry)
+
+  if (status === 'success' && isArchivePath(finalDestination)) {
+    try {
+      await appendArchiveItem({
+        id: randomUUID(),
+        fileName: path.basename(proposedAction.fromPath),
+        fromPath: proposedAction.fromPath,
+        toPath: finalDestination,
+        archivedAt: Date.now(),
+        ruleId: proposedAction.ruleId || 'rule',
+        status: 'archived'
+      })
+    } catch {
+      // Ignore archive index errors.
+    }
+  }
 
   return { status, finalDestination, errorMessage }
 }
