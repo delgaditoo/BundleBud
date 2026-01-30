@@ -15,7 +15,9 @@ import {
   getAutomationMode,
   setAutomationMode,
   listReviewQueue,
-  updateProposedAction
+  updateProposedAction,
+  listRules,
+  saveRules
 } from './agent/automationStore.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -451,6 +453,14 @@ ipcMain.handle('automation:setMode', async (_event, mode) => {
 
 ipcMain.handle('automation:listQueue', async () => {
   return listReviewQueue()
+})
+
+ipcMain.handle('automation:listRules', async () => {
+  return listRules()
+})
+
+ipcMain.handle('automation:saveRules', async (_event, rules) => {
+  return saveRules(rules)
 })
 
 ipcMain.handle('automation:apply', async (_event, actionId) => {

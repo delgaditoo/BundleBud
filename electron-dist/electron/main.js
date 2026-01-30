@@ -11,7 +11,7 @@ import { randomUUID } from 'crypto';
 import chokidar from 'chokidar';
 import { processFile, executeMoveAction } from './agent/processFile.js';
 import { getDashboardStats } from './agent/stats.js';
-import { getAutomationMode, setAutomationMode, listReviewQueue, updateProposedAction } from './agent/automationStore.js';
+import { getAutomationMode, setAutomationMode, listReviewQueue, updateProposedAction, listRules, saveRules } from './agent/automationStore.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 let mainWindow;
@@ -412,6 +412,12 @@ ipcMain.handle('automation:setMode', async (_event, mode) => {
 });
 ipcMain.handle('automation:listQueue', async () => {
     return listReviewQueue();
+});
+ipcMain.handle('automation:listRules', async () => {
+    return listRules();
+});
+ipcMain.handle('automation:saveRules', async (_event, rules) => {
+    return saveRules(rules);
 });
 ipcMain.handle('automation:apply', async (_event, actionId) => {
     const item = await findQueuedAction(actionId);

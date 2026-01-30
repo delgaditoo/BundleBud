@@ -150,7 +150,7 @@ export async function processFile(filePath, source) {
             source,
             detectedAt
         };
-        const match = applyRules(fileInfo);
+        const match = (await applyRules(fileInfo));
         if (!match) {
             await appendEntry({
                 id: randomUUID(),

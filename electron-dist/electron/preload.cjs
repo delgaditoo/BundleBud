@@ -18,6 +18,8 @@ electron_1.contextBridge.exposeInMainWorld('api', {
     getAutomationMode: () => electron_1.ipcRenderer.invoke('automation:getMode'),
     setAutomationMode: (mode) => electron_1.ipcRenderer.invoke('automation:setMode', mode),
     listReviewQueue: () => electron_1.ipcRenderer.invoke('automation:listQueue'),
+    listRules: () => electron_1.ipcRenderer.invoke('automation:listRules'),
+    saveRules: (rules) => electron_1.ipcRenderer.invoke('automation:saveRules', rules),
     applyProposedAction: (actionId) => electron_1.ipcRenderer.invoke('automation:apply', actionId),
     rejectProposedAction: (actionId) => electron_1.ipcRenderer.invoke('automation:reject', actionId),
     startDesktopWatcher: () => electron_1.ipcRenderer.invoke('desktop-watcher:start'),

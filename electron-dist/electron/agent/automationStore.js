@@ -4,7 +4,8 @@ import { app } from 'electron';
 const STORE_FILENAME = 'automation.json';
 const DEFAULT_STORE = {
     automationMode: 'review',
-    reviewQueue: []
+    reviewQueue: [],
+    rules: []
 };
 function getStorePath() {
     return path.join(app.getPath('userData'), STORE_FILENAME);
@@ -16,6 +17,9 @@ function normalizeStore(data) {
     }
     if (!Array.isArray(store.reviewQueue)) {
         store.reviewQueue = [];
+    }
+    if (!Array.isArray(store.rules)) {
+        store.rules = [];
     }
     return store;
 }
@@ -52,6 +56,16 @@ export async function setAutomationMode(mode) {
 export async function listReviewQueue() {
     const store = await readStore();
     return store.reviewQueue;
+}
+export async function listRules() {
+    const store = await readStore();
+    return store.rules;
+}
+export async function saveRules(rules) {
+    const store = await readStore();
+    store.rules = Array.isArray(rules) ? rules : [];
+    await writeStore(store);
+    return store.rules;
 }
 export async function enqueueProposedAction(action) {
     const store = await readStore();

@@ -19,6 +19,8 @@ declare global {
       getAutomationMode: () => Promise<{ mode: 'auto' | 'review' }>
       setAutomationMode: (mode: 'auto' | 'review') => Promise<{ mode: 'auto' | 'review' }>
       listReviewQueue: () => Promise<any[]>
+      listRules: () => Promise<any[]>
+      saveRules: (rules: any[]) => Promise<any[]>
       applyProposedAction: (actionId: string) => Promise<any>
       rejectProposedAction: (actionId: string) => Promise<any>
       startDesktopWatcher: () => Promise<{ running: boolean }>

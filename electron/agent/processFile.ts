@@ -205,7 +205,7 @@ export async function processFile(filePath: string, source: SourceType) {
       detectedAt
     }
 
-    const match = applyRules(fileInfo) as RuleMatch | null
+    const match = (await applyRules(fileInfo)) as RuleMatch | null
 
     if (!match) {
       await appendEntry({

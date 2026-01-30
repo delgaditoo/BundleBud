@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
   getAutomationMode: () => ipcRenderer.invoke('automation:getMode'),
   setAutomationMode: (mode: 'auto' | 'review') => ipcRenderer.invoke('automation:setMode', mode),
   listReviewQueue: () => ipcRenderer.invoke('automation:listQueue'),
+  listRules: () => ipcRenderer.invoke('automation:listRules'),
+  saveRules: (rules: any[]) => ipcRenderer.invoke('automation:saveRules', rules),
   applyProposedAction: (actionId: string) => ipcRenderer.invoke('automation:apply', actionId),
   rejectProposedAction: (actionId: string) => ipcRenderer.invoke('automation:reject', actionId),
   startDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:start'),
