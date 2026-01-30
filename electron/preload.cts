@@ -24,5 +24,6 @@ contextBridge.exposeInMainWorld('api', {
   getDesktopWatcherStatus: () => ipcRenderer.invoke('desktop-watcher:status'),
   startDownloadsWatcher: () => ipcRenderer.invoke('downloads-watcher:start'),
   stopDownloadsWatcher: () => ipcRenderer.invoke('downloads-watcher:stop'),
-  getDownloadsWatcherStatus: () => ipcRenderer.invoke('downloads-watcher:status')
+  getDownloadsWatcherStatus: () => ipcRenderer.invoke('downloads-watcher:status'),
+  getSystemInfo: () => ipcRenderer.invoke('system:getInfo')
 })

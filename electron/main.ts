@@ -2,6 +2,9 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs/promises'
+import os from 'os'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { scanFiles, analyzeDuplicates, executePlan } from './fs.js'
 import { appendEntry, clearAll, readRecent } from './agent/ledger.js'
 import { randomUUID } from 'crypto'
@@ -22,6 +25,7 @@ let mainWindow: BrowserWindow | null
 let desktopWatcher: chokidar.FSWatcher | null = null
 let downloadsWatcher: chokidar.FSWatcher | null = null
 const downloadsInflight = new Map<string, boolean>()
+const execFileAsync = promisify(execFile)
 
 function isDesktopWatcherRunning() {
   return Boolean(desktopWatcher)
@@ -291,6 +295,52 @@ ipcMain.handle('downloads-watcher:stop', async () => {
 
 ipcMain.handle('downloads-watcher:status', async () => {
   return { running: isDownloadsWatcherRunning() }
+})
+
+ipcMain.handle('system:getInfo', async () => {
+  const cpu = os.cpus()
+  const totalMem = os.totalmem()
+  const hostname = os.hostname()
+  const platform = os.platform()
+  const release = os.release()
+
+  let model = ''
+  try {
+    if (process.platform === 'darwin') {
+      const { stdout } = await execFileAsync('sysctl', ['-n', 'hw.model'])
+      model = String(stdout).trim()
+    }
+  } catch {
+    model = ''
+  }
+
+  let storage = { total: 0, free: 0 }
+  try {
+    const stats = await fs.statfs('/')
+    storage = {
+      total: stats.bsize * stats.blocks,
+      free: stats.bsize * stats.bavail
+    }
+  } catch {
+    storage = { total: 0, free: 0 }
+  }
+
+  return {
+    hardware: {
+      model,
+      hostname,
+      platform,
+      release
+    },
+    cpu: {
+      model: cpu[0]?.model || '',
+      cores: cpu.length
+    },
+    memory: {
+      totalBytes: totalMem
+    },
+    storage
+  }
 })
 
 ipcMain.handle('activity:canUndo', async () => {

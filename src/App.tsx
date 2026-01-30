@@ -1,4 +1,16 @@
 import React, { useMemo, useState, useEffect } from 'react'
+import {
+  PiGauge,
+  PiWrench,
+  PiFolder,
+  PiLightning,
+  PiBroomBold,
+  PiLaptop,
+  PiCpu,
+  PiMemory,
+  PiHardDrive,
+  PiDesktop
+} from 'react-icons/pi'
 
 const DEFAULT_MAX_SIZE_MB = 250
 
@@ -26,64 +38,11 @@ function shortenPath(value, maxLength = 64) {
   return `${head}…${tail}`
 }
 
-function IconSparkle() {
+function BrandMark() {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <path d="M12 3l1.8 4.3L18 9l-4.2 1.7L12 15l-1.8-4.3L6 9l4.2-1.7L12 3z" />
-    </svg>
-  )
-}
-
-function IconGauge() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <path d="M4 13a8 8 0 1 1 16 0" />
-      <path d="M12 13l4-4" />
-    </svg>
-  )
-}
-
-function IconWrench() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <path d="M21 7a6 6 0 0 1-7.5 5.8L6 20l-2-2 7.2-7.5A6 6 0 0 1 17 3l-3 3 4 4 3-3z" />
-    </svg>
-  )
-}
-
-function IconBroom() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <path d="M3 19l6-6" />
-      <path d="M14 3l7 7" />
-      <path d="M8 15l6 6" />
-    </svg>
-  )
-}
-
-function IconCleaner() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <path d="M4 14l6-6 4 4-6 6H4z" />
-      <path d="M13 7l2-2 4 4-2 2" />
-      <path d="M6 20h6" />
-    </svg>
-  )
-}
-
-function IconFolder() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <path d="M3 7h6l2 2h10v10H3z" />
-    </svg>
-  )
-}
-
-function IconBolt() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <path d="M13 2l-9 12h7l-1 8 9-12h-7l1-8z" />
-    </svg>
+    <span className="brand-mark" aria-hidden="true">
+      BB
+    </span>
   )
 }
 
@@ -113,6 +72,7 @@ export default function App() {
   const [automationMode, setAutomationMode] = useState('review')
   const [reviewQueue, setReviewQueue] = useState([])
   const [reviewLoading, setReviewLoading] = useState(false)
+  const [systemInfo, setSystemInfo] = useState(null)
 
   const suggestions = analysis.suggestions || []
 
@@ -132,7 +92,20 @@ export default function App() {
       loadReviewQueue()
       loadAutomationMode()
     }
+    if (view === 'system') {
+      loadSystemInfo()
+    }
   }, [view])
+
+  async function loadSystemInfo() {
+    try {
+      if (!api?.getSystemInfo) return
+      const info = await api.getSystemInfo()
+      setSystemInfo(info)
+    } catch {
+      setSystemInfo(null)
+    }
+  }
 
   async function loadActivity(limit = 50) {
     setActivityError('')
@@ -462,10 +435,11 @@ export default function App() {
   )
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: <IconGauge /> },
-    { id: 'review-queue', label: 'Review Queue', icon: <IconWrench /> },
-    { id: 'organizer', label: 'Cleaner', icon: <IconCleaner /> },
-    { id: 'activity', label: 'Activity Ledger', icon: <IconFolder /> }
+    { id: 'dashboard', label: 'Dashboard', icon: <PiGauge size={18} /> },
+    { id: 'review-queue', label: 'Review Queue', icon: <PiWrench size={18} /> },
+    { id: 'organizer', label: 'Cleaner', icon: <PiBroomBold size={18} /> },
+    { id: 'activity', label: 'Activity Ledger', icon: <PiFolder size={18} /> },
+    { id: 'system', label: 'System Settings', icon: <PiLaptop size={18} /> }
   ]
 
   const pageMeta = (() => {
@@ -494,6 +468,13 @@ export default function App() {
         subtitle: 'Local-only flight recorder for BundleBud.'
       }
     }
+    if (view === 'system') {
+      return {
+        kicker: 'System',
+        title: 'System Settings',
+        subtitle: 'Hardware and storage details for this Mac.'
+      }
+    }
     if (step === 'review') {
       return {
         kicker: 'Cleaner',
@@ -517,15 +498,17 @@ export default function App() {
 
   const shellHeader = (
     <header className="shell-header">
-      <div>
+      <div className="header-text">
         <div className="app-kicker">{pageMeta.kicker}</div>
         <h1>{pageMeta.title}</h1>
-        <p className="shell-subtitle">{pageMeta.subtitle}</p>
-      </div>
-      <div className="header-actions">
-        <button className="ghost" onClick={() => api?.openExternal('https://electronjs.org')}>
-          Electron Docs
-        </button>
+        <div className="header-subrow">
+          <p className="shell-subtitle">{pageMeta.subtitle}</p>
+          <div className="header-actions">
+            <button className="ghost small" onClick={() => api?.openExternal('https://electronjs.org')}>
+              Electron Docs
+            </button>
+          </div>
+        </div>
       </div>
     </header>
   )
@@ -534,7 +517,7 @@ export default function App() {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <div className="brand-icon">
-          <IconSparkle />
+          <BrandMark />
         </div>
         <div className="brand-title">BundleBud</div>
         <span className="brand-badge">Beta</span>
@@ -671,15 +654,15 @@ export default function App() {
               <span className="muted">Current</span>
               <span className="mono">{automationMode === 'auto' ? 'Auto' : 'Review'}</span>
             </div>
-            <div className="panel-row">
+            <div className="panel-row mode-row">
               <button
-                className={automationMode === 'auto' ? 'secondary' : 'ghost'}
+                className={`mode-button ${automationMode === 'auto' ? 'secondary' : 'ghost'}`}
                 onClick={() => handleSetAutomationMode('auto')}
               >
                 Auto
               </button>
               <button
-                className={automationMode === 'review' ? 'secondary' : 'ghost'}
+                className={`mode-button ${automationMode === 'review' ? 'secondary' : 'ghost'}`}
                 onClick={() => handleSetAutomationMode('review')}
               >
                 Review
@@ -766,7 +749,7 @@ export default function App() {
 
         <div className="callout">
           <div className="callout-icon">
-            <IconBolt />
+            <PiLightning size={18} />
           </div>
           <div>
             <div className="callout-title">Queued actions ready</div>
@@ -810,11 +793,11 @@ export default function App() {
             <div className="muted">Status: {watcherStatus.running ? 'Running' : 'Stopped'}</div>
           </div>
           <button
-            className={watcherStatus.running ? 'ghost' : 'secondary'}
+            className={`toggle ${watcherStatus.running ? 'is-on' : 'is-off'}`}
             onClick={handleToggleWatcher}
             disabled={watcherBusy}
           >
-            {watcherStatus.running ? 'Off' : 'On'}
+            <span className="toggle-label">{watcherStatus.running ? 'On' : 'Off'}</span>
           </button>
         </section>
 
@@ -826,31 +809,35 @@ export default function App() {
             </div>
           </div>
           <button
-            className={downloadsWatcherStatus.running ? 'ghost' : 'secondary'}
+            className={`toggle ${downloadsWatcherStatus.running ? 'is-on' : 'is-off'}`}
             onClick={handleToggleDownloadsWatcher}
             disabled={downloadsWatcherBusy}
           >
-            {downloadsWatcherStatus.running ? 'Off' : 'On'}
+            <span className="toggle-label">{downloadsWatcherStatus.running ? 'On' : 'Off'}</span>
           </button>
         </section>
 
         <section className="section activity-controls">
-          <button
-            className="secondary"
-            onClick={handleUndo}
-            disabled={undoBusy || !undoState.canUndo}
-          >
-            Undo last move
-          </button>
-          <button className="secondary" onClick={handleAddTestActivity} disabled={activityLoading}>
-            Add test event
-          </button>
-          <button className="ghost" onClick={handleClearActivity} disabled={activityLoading}>
-            Clear log
-          </button>
-          <button className="ghost" onClick={() => loadActivity(50)} disabled={activityLoading}>
-            Refresh
-          </button>
+          <div className="activity-actions-left">
+            <button
+              className="secondary"
+              onClick={handleUndo}
+              disabled={undoBusy || !undoState.canUndo}
+            >
+              Undo last move
+            </button>
+            <button className="secondary" onClick={handleAddTestActivity} disabled={activityLoading}>
+              Add test event
+            </button>
+          </div>
+          <div className="activity-actions-right">
+            <button className="secondary" onClick={handleClearActivity} disabled={activityLoading}>
+              Clear log
+            </button>
+            <button className="secondary" onClick={() => loadActivity(50)} disabled={activityLoading}>
+              Refresh
+            </button>
+          </div>
         </section>
 
         <section className="section activity-list">
@@ -878,11 +865,82 @@ export default function App() {
                         <div className="muted">{entry.kind}</div>
                       )}
                     </div>
-                    <div className="muted">{formatLocalTime(entry.ts)}</div>
+                    <div className="muted activity-date">{formatLocalTime(entry.ts)}</div>
                   </div>
                 ))
             : null}
         </section>
+      </div>
+    )
+  }
+
+  if (view === 'system') {
+    const systemDetails = [
+      {
+        icon: <PiDesktop size={20} />,
+        title: 'Mac Model',
+        subtitle: 'Device Information',
+        items: [
+          { label: 'Model', value: systemInfo?.hardware?.model || '—' },
+          { label: 'Name', value: systemInfo?.hardware?.hostname || '—' }
+        ]
+      },
+      {
+        icon: <PiCpu size={20} />,
+        title: 'Processor',
+        subtitle: 'CPU Information',
+        items: [
+          { label: 'Model', value: systemInfo?.cpu?.model || '—' },
+          { label: 'Cores', value: systemInfo?.cpu?.cores ? `${systemInfo.cpu.cores} cores` : '—' }
+        ]
+      },
+      {
+        icon: <PiMemory size={20} />,
+        title: 'Memory',
+        subtitle: 'RAM Information',
+        items: [
+          { label: 'Total Memory', value: systemInfo?.memory?.totalBytes ? formatBytes(systemInfo.memory.totalBytes) : '—' },
+          { label: 'Type', value: 'Unified' }
+        ]
+      },
+      {
+        icon: <PiHardDrive size={20} />,
+        title: 'Storage',
+        subtitle: 'Disk Information',
+        items: [
+          { label: 'Total Space', value: systemInfo?.storage?.total ? formatBytes(systemInfo.storage.total) : '—' },
+          { label: 'Available', value: systemInfo?.storage?.free ? formatBytes(systemInfo.storage.free) : '—' }
+        ]
+      }
+    ]
+
+    return renderShell(
+      <div className="panel">
+        <div className="panel-header">
+          <h2>System overview</h2>
+          <p className="muted">Hardware details pulled from your device.</p>
+        </div>
+        <div className="info-grid">
+          {systemDetails.map((card) => (
+            <div className="info-card" key={card.title}>
+              <div className="info-card__header">
+                <div className="info-icon">{card.icon}</div>
+                <div>
+                  <div className="info-title">{card.title}</div>
+                  <div className="info-subtitle">{card.subtitle}</div>
+                </div>
+              </div>
+              <div className="info-card__body">
+                {card.items.map((item) => (
+                  <div className="info-item" key={item.label}>
+                    <div className="info-label">{item.label}</div>
+                    <div className="info-value">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
