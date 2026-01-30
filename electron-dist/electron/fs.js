@@ -23,6 +23,8 @@ export async function scanFiles(root, options = {}) {
     for (const extra of options.excludes || []) {
         excludes.add(extra);
     }
+    const excludePaths = Array.isArray(options.excludePaths) ? options.excludePaths : [];
+    const excludeHidden = options.excludeHidden !== false;
     const maxFiles = Number.isFinite(options.maxFiles) ? options.maxFiles : 5000;
     const results = [];
     let truncated = false;
@@ -38,6 +40,11 @@ export async function scanFiles(root, options = {}) {
         }
         for (const entry of entries) {
             const fullPath = path.join(current, entry.name);
+            if (excludeHidden && entry.name.startsWith('.'))
+                continue;
+            if (excludePaths.some((blockedPath) => fullPath.startsWith(blockedPath))) {
+                continue;
+            }
             if (entry.isDirectory()) {
                 if (excludes.has(entry.name))
                     continue;
@@ -91,6 +98,7 @@ export async function analyzeDuplicates(files = [], options = {}) {
                 file: file.name,
                 path: file.path,
                 relPath: file.relPath,
+                rootPath: file.rootPath,
                 action: 'keep',
                 reason: `Too large to hash in MVP (>${maxSizeMB} MB)`
             });
@@ -108,6 +116,7 @@ export async function analyzeDuplicates(files = [], options = {}) {
                 file: file.name,
                 path: file.path,
                 relPath: file.relPath,
+                rootPath: file.rootPath,
                 action: 'keep',
                 reason: 'Hashing failed'
             });
@@ -122,6 +131,7 @@ export async function analyzeDuplicates(files = [], options = {}) {
             file: keepFile.name,
             path: keepFile.path,
             relPath: keepFile.relPath,
+            rootPath: keepFile.rootPath,
             action: 'keep',
             reason: 'Newest file in duplicate group'
         });
@@ -130,6 +140,7 @@ export async function analyzeDuplicates(files = [], options = {}) {
                 file: duplicate.name,
                 path: duplicate.path,
                 relPath: duplicate.relPath,
+                rootPath: duplicate.rootPath,
                 action: 'move-to-archive',
                 reason: 'Duplicate (older version)',
                 targetPath: path.join('_Archive_AI_Organizer', runId, duplicate.relPath)
@@ -159,9 +170,6 @@ async function moveFileSafe(source, destination) {
 }
 export async function executePlan(plan = {}) {
     const { folderPath, runId = toTimestamp(), items = [] } = plan;
-    const archiveRoot = folderPath
-        ? path.join(folderPath, '_Archive_AI_Organizer', runId)
-        : null;
     const results = [];
     for (const item of items) {
         if (!item || !item.path)
@@ -171,6 +179,8 @@ export async function executePlan(plan = {}) {
                 results.push({ file: item.file, action: 'keep', success: true });
                 continue;
             }
+            const baseRoot = item.rootPath || folderPath || null;
+            const archiveRoot = baseRoot ? path.join(baseRoot, '_Archive_AI_Organizer', runId) : null;
             if (item.action === 'move-to-trash') {
                 try {
                     await shell.trashItem(item.path);
@@ -192,10 +202,10 @@ export async function executePlan(plan = {}) {
                 }
             }
             if (item.action === 'move-to-archive') {
-                if (!archiveRoot)
+                if (!archiveRoot || !baseRoot)
                     throw new Error('Archive root missing');
                 const destination = item.targetPath
-                    ? path.join(folderPath, item.targetPath)
+                    ? path.join(baseRoot, item.targetPath)
                     : path.join(archiveRoot, item.relPath || path.basename(item.path));
                 await moveFileSafe(item.path, destination);
                 results.push({ file: item.file, action: 'move-to-archive', success: true });
@@ -219,7 +229,7 @@ export async function executePlan(plan = {}) {
     const report = {
         runId,
         folderPath,
-        archiveRoot: archiveRoot || null,
+        archiveRoot: folderPath ? path.join(folderPath, '_Archive_AI_Organizer', runId) : null,
         executedAt: new Date().toISOString(),
         planItems: items,
         summary,

@@ -27,6 +27,8 @@ declare global {
       startDownloadsWatcher: () => Promise<{ running: boolean }>
       stopDownloadsWatcher: () => Promise<{ running: boolean }>
       getDownloadsWatcherStatus: () => Promise<{ running: boolean }>
+      getSystemInfo: () => Promise<any>
+      getScanConfig: () => Promise<any>
     }
   }
 }

@@ -19,6 +19,19 @@ let desktopWatcher = null;
 let downloadsWatcher = null;
 const downloadsInflight = new Map();
 const execFileAsync = promisify(execFile);
+async function listExternalVolumes() {
+    if (process.platform !== 'darwin')
+        return [];
+    try {
+        const entries = await fs.readdir('/Volumes', { withFileTypes: true });
+        return entries
+            .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+            .map((entry) => path.join('/Volumes', entry.name));
+    }
+    catch {
+        return [];
+    }
+}
 function isDesktopWatcherRunning() {
     return Boolean(desktopWatcher);
 }
@@ -269,6 +282,22 @@ ipcMain.handle('downloads-watcher:stop', async () => {
 });
 ipcMain.handle('downloads-watcher:status', async () => {
     return { running: isDownloadsWatcherRunning() };
+});
+ipcMain.handle('scan:getConfig', async () => {
+    const sets = [
+        { id: 'desktop', label: 'Desktop', path: app.getPath('desktop') },
+        { id: 'downloads', label: 'Downloads', path: app.getPath('downloads') },
+        { id: 'documents', label: 'Documents', path: app.getPath('documents') },
+        { id: 'pictures', label: 'Pictures', path: app.getPath('pictures') },
+        { id: 'external', label: 'External drives', path: null }
+    ];
+    return {
+        sets,
+        excludeNames: ['node_modules', '.git', 'Library', 'System'],
+        excludeHiddenDefault: true,
+        excludePaths: [app.getPath('userData')],
+        externalVolumes: await listExternalVolumes()
+    };
 });
 ipcMain.handle('system:getInfo', async () => {
     const cpu = os.cpus();

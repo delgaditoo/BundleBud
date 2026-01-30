@@ -26,5 +26,6 @@ electron_1.contextBridge.exposeInMainWorld('api', {
     startDownloadsWatcher: () => electron_1.ipcRenderer.invoke('downloads-watcher:start'),
     stopDownloadsWatcher: () => electron_1.ipcRenderer.invoke('downloads-watcher:stop'),
     getDownloadsWatcherStatus: () => electron_1.ipcRenderer.invoke('downloads-watcher:status'),
-    getSystemInfo: () => electron_1.ipcRenderer.invoke('system:getInfo')
+    getSystemInfo: () => electron_1.ipcRenderer.invoke('system:getInfo'),
+    getScanConfig: () => electron_1.ipcRenderer.invoke('scan:getConfig')
 });

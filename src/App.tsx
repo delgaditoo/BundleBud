@@ -73,6 +73,11 @@ export default function App() {
   const [reviewQueue, setReviewQueue] = useState([])
   const [reviewLoading, setReviewLoading] = useState(false)
   const [systemInfo, setSystemInfo] = useState(null)
+  const [scanConfig, setScanConfig] = useState(null)
+  const [scanSets, setScanSets] = useState([])
+  const [includeHidden, setIncludeHidden] = useState(false)
+  const [scanScope, setScanScope] = useState('recommended')
+  const [showScanDetails, setShowScanDetails] = useState(false)
 
   const suggestions = analysis.suggestions || []
 
@@ -95,7 +100,16 @@ export default function App() {
     if (view === 'system') {
       loadSystemInfo()
     }
+    if (view === 'organizer' && step === 'setup') {
+      loadScanConfig()
+    }
   }, [view])
+
+  useEffect(() => {
+    if (view === 'organizer' && step === 'setup') {
+      loadScanConfig()
+    }
+  }, [step])
 
   async function loadSystemInfo() {
     try {
@@ -194,6 +208,24 @@ export default function App() {
       setActivityError(err?.message || 'Failed to load review queue.')
     } finally {
       setReviewLoading(false)
+    }
+  }
+
+  async function loadScanConfig() {
+    try {
+      if (!api?.getScanConfig) return
+      const config = await api.getScanConfig()
+      setScanConfig(config)
+      const defaults = (config?.sets || []).map((set) => ({
+        ...set,
+        enabled: set.id !== 'external'
+      }))
+      setScanSets(defaults)
+      setIncludeHidden(!(config?.excludeHiddenDefault ?? true))
+      setScanScope('recommended')
+      setShowScanDetails(false)
+    } catch {
+      setScanConfig(null)
     }
   }
 
@@ -361,6 +393,96 @@ export default function App() {
     }
   }
 
+  async function handleRunScanSets() {
+    setError('')
+    if (!api?.scanFiles) {
+      setError('Bridge unavailable. Please restart the app.')
+      return
+    }
+
+    const enabledSets = scanSets.filter((set) => set.enabled)
+    const roots: string[] = []
+    enabledSets.forEach((set) => {
+      if (set.id === 'external') {
+        const volumes = scanConfig?.externalVolumes || []
+        volumes.forEach((volume: string) => roots.push(volume))
+        return
+      }
+      if (set.path) roots.push(set.path)
+    })
+
+    if (!roots.length) {
+      setError('Enable at least one Scan Set.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const options = {
+        excludes: scanConfig?.excludeNames || [],
+        excludePaths: scanConfig?.excludePaths || [],
+        excludeHidden: !includeHidden
+      }
+      const scans = await Promise.all(
+        roots.map((root) => api.scanFiles(root, options))
+      )
+      const files = scans.flatMap((scan, index) =>
+        (scan?.files || []).map((file: any) => ({
+          ...file,
+          rootPath: roots[index]
+        }))
+      )
+      const totalSize = files.reduce((sum, file) => sum + (file.size || 0), 0)
+      const truncated = scans.some((scan) => scan?.truncated)
+      const maxFiles = scans.reduce((sum, scan) => sum + (scan?.maxFiles || 0), 0)
+      setScanResult({ files, totalSize, truncated, maxFiles })
+      setFolderPath('')
+    } catch (err) {
+      setError(err?.message || 'Scan failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function toggleScanSet(targetId) {
+    setScanSets((prev) =>
+      prev.map((set) =>
+        set.id === targetId ? { ...set, enabled: !set.enabled } : set
+      )
+    )
+  }
+
+  function applyScope(nextScope) {
+    setScanScope(nextScope)
+    if (nextScope === 'desktop') {
+      setScanSets((prev) =>
+        prev.map((set) => ({
+          ...set,
+          enabled: set.id === 'desktop'
+        }))
+      )
+      return
+    }
+    if (nextScope === 'all') {
+      setScanSets((prev) =>
+        prev.map((set) => ({
+          ...set,
+          enabled: set.id !== 'external'
+        }))
+      )
+      return
+    }
+    if (nextScope === 'recommended') {
+      setScanSets((prev) =>
+        prev.map((set) => ({
+          ...set,
+          enabled: ['desktop', 'downloads', 'pictures', 'documents'].includes(set.id)
+        }))
+      )
+      return
+    }
+  }
+
   async function handleAnalyze() {
     if (!scanResult.files.length) return
     setError('')
@@ -400,7 +522,12 @@ export default function App() {
   }
 
   async function handleExecute() {
-    const items = suggestions.filter((item) => selected[item.path] && item.action !== 'keep')
+    const items = suggestions
+      .filter((item) => selected[item.path] && item.action !== 'keep')
+      .map((item) => ({
+        ...item,
+        rootPath: item.rootPath
+      }))
 
     if (!items.length) return
 
@@ -408,7 +535,7 @@ export default function App() {
     setLoading(true)
     try {
       const result = await api.executePlan({
-        folderPath,
+        folderPath: folderPath || null,
         runId: analysis.runId,
         items
       })
@@ -946,24 +1073,126 @@ export default function App() {
   }
 
   if (step === 'setup') {
+    const enabledLabels = scanSets.filter((set) => set.enabled).map((set) => set.label)
+    const scopeSummary = enabledLabels.length
+      ? `We’ll scan ${enabledLabels.join(', ')}.`
+      : 'No locations selected yet.'
+
     return renderShell(
       <div className="panel">
         <div className="panel-header">
           <h2>Cleaner setup</h2>
-          <p className="muted">Choose a folder to scan for duplicates.</p>
+          <p className="muted">Pick a scan scope and we’ll handle the rest.</p>
         </div>
         {error ? <div className="error">{error}</div> : null}
 
         <section className="section">
-          <button className="primary" onClick={handleSelectFolder} disabled={loading}>
-            Select folder
+          <div className="panel-header">
+            <h2>Scan scope</h2>
+            <p className="muted">Recommended scans your everyday folders with safe defaults.</p>
+          </div>
+          <div className="scan-scope-row">
+            <select
+              value={scanScope}
+              onChange={(event) => applyScope(event.target.value)}
+            >
+              <option value="recommended">Recommended</option>
+              <option value="desktop">Desktop only</option>
+              <option value="all">All standard folders</option>
+              <option value="custom">Custom</option>
+            </select>
+            <button className="ghost" onClick={() => setShowScanDetails((prev) => !prev)}>
+              {showScanDetails ? 'Hide details' : 'Edit locations'}
+            </button>
+          </div>
+          <div className="scan-summary">{scopeSummary}</div>
+          {scanScope === 'custom' ? (
+            <div className="scan-set-list">
+              {scanSets.map((set) => (
+                <div className="scan-set-row" key={set.id}>
+                  <div>
+                    <div className="scan-set-title">{set.label}</div>
+                    {showScanDetails ? (
+                      set.id === 'external' ? (
+                        <div className="muted">
+                          {(scanConfig?.externalVolumes || []).length
+                            ? (scanConfig?.externalVolumes || []).join(', ')
+                            : 'No external drives detected'}
+                        </div>
+                      ) : (
+                        <div className="muted">{set.path || '—'}</div>
+                      )
+                    ) : null}
+                  </div>
+                  <button
+                    className={`toggle ${set.enabled ? 'is-on' : 'is-off'}`}
+                    onClick={() => toggleScanSet(set.id)}
+                    disabled={loading}
+                  >
+                    <span className="toggle-label">{set.enabled ? 'On' : 'Off'}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="section">
+          <div className="scan-options">
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={includeHidden}
+                onChange={(event) => setIncludeHidden(event.target.checked)}
+              />
+              Include hidden files
+            </label>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="summary">
+            <div className="summary-row">
+              <span>Excluded folders</span>
+              <span>System folders, hidden items, dev caches</span>
+            </div>
+            <div className="summary-row">
+              <span>App internal data</span>
+              <span>BundleBud data & reports</span>
+            </div>
+            {showScanDetails ? (
+              <>
+                <div className="summary-row">
+                  <span className="muted">Excluded names</span>
+                  <span className="mono">{(scanConfig?.excludeNames || []).join(', ') || '—'}</span>
+                </div>
+                <div className="summary-row">
+                  <span className="muted">Excluded paths</span>
+                  <span className="mono">{(scanConfig?.excludePaths || []).join(', ') || '—'}</span>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="section">
+          <label className="label">Max file size for hashing (MB)</label>
+          <input
+            type="number"
+            min="1"
+            max="2048"
+            value={maxSizeMB}
+            onChange={(event) => setMaxSizeMB(Number(event.target.value || DEFAULT_MAX_SIZE_MB))}
+            className="input"
+          />
+        </section>
+
+        <section className="section">
+          <button className="secondary" onClick={handleRunScanSets} disabled={loading}>
+            {loading ? 'Scanning…' : 'Run Scan'}
           </button>
-          {folderPath ? (
+          {scanResult.files.length ? (
             <div className="summary">
-              <div className="summary-row">
-                <span>Folder</span>
-                <span className="mono">{folderPath}</span>
-              </div>
               <div className="summary-row">
                 <span>Files found</span>
                 <span>{scanResult.files.length}</span>
@@ -980,23 +1209,8 @@ export default function App() {
               ) : null}
             </div>
           ) : null}
-        </section>
-
-        <section className="section">
-          <label className="label">Max file size for hashing (MB)</label>
-          <input
-            type="number"
-            min="1"
-            max="2048"
-            value={maxSizeMB}
-            onChange={(event) => setMaxSizeMB(Number(event.target.value || DEFAULT_MAX_SIZE_MB))}
-            className="input"
-          />
-        </section>
-
-        <section className="section">
           <button
-            className="secondary"
+            className="ghost"
             onClick={handleAnalyze}
             disabled={loading || !scanResult.files.length}
           >
