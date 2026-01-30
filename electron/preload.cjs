@@ -7,5 +7,22 @@ contextBridge.exposeInMainWorld('api', {
   executePlan: (plan) => ipcRenderer.invoke('execute-plan', plan),
   revealInFinder: (targetPath) => ipcRenderer.invoke('reveal-in-finder', targetPath),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
-  openReportFolder: (reportPath) => ipcRenderer.invoke('open-report-folder', reportPath)
+  openReportFolder: (reportPath) => ipcRenderer.invoke('open-report-folder', reportPath),
+  getActivity: (limit) => ipcRenderer.invoke('activity:getRecent', limit),
+  clearActivity: () => ipcRenderer.invoke('activity:clear'),
+  addTestActivity: () => ipcRenderer.invoke('activity:addTestEntry'),
+  canUndo: () => ipcRenderer.invoke('activity:canUndo'),
+  undoLastMove: () => ipcRenderer.invoke('activity:undoLastMove'),
+  getDashboardStats: () => ipcRenderer.invoke('dashboard:getStats'),
+  getAutomationMode: () => ipcRenderer.invoke('automation:getMode'),
+  setAutomationMode: (mode) => ipcRenderer.invoke('automation:setMode', mode),
+  listReviewQueue: () => ipcRenderer.invoke('automation:listQueue'),
+  applyProposedAction: (actionId) => ipcRenderer.invoke('automation:apply', actionId),
+  rejectProposedAction: (actionId) => ipcRenderer.invoke('automation:reject', actionId),
+  startDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:start'),
+  stopDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:stop'),
+  getDesktopWatcherStatus: () => ipcRenderer.invoke('desktop-watcher:status'),
+  startDownloadsWatcher: () => ipcRenderer.invoke('downloads-watcher:start'),
+  stopDownloadsWatcher: () => ipcRenderer.invoke('downloads-watcher:stop'),
+  getDownloadsWatcherStatus: () => ipcRenderer.invoke('downloads-watcher:status')
 })
