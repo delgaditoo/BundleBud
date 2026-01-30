@@ -5,7 +5,14 @@ import { app } from 'electron'
 const STORE_FILENAME = 'automation.json'
 const DEFAULT_STORE = {
   automationMode: 'review' as 'auto' | 'review',
-  reviewQueue: [] as any[]
+  reviewQueue: [] as any[],
+  rules: [] as any[],
+  settings: {
+    scanScope: 'recommended',
+    includeHidden: false,
+    maxSizeMB: 250,
+    scanSetEnabled: {} as Record<string, boolean>
+  }
 }
 
 function getStorePath() {
@@ -19,6 +26,24 @@ function normalizeStore(data: any) {
   }
   if (!Array.isArray(store.reviewQueue)) {
     store.reviewQueue = []
+  }
+  if (!Array.isArray(store.rules)) {
+    store.rules = []
+  }
+  if (!store.settings || typeof store.settings !== 'object') {
+    store.settings = { ...DEFAULT_STORE.settings }
+  }
+  if (!store.settings.scanScope) {
+    store.settings.scanScope = DEFAULT_STORE.settings.scanScope
+  }
+  if (typeof store.settings.includeHidden !== 'boolean') {
+    store.settings.includeHidden = DEFAULT_STORE.settings.includeHidden
+  }
+  if (!Number.isFinite(store.settings.maxSizeMB)) {
+    store.settings.maxSizeMB = DEFAULT_STORE.settings.maxSizeMB
+  }
+  if (!store.settings.scanSetEnabled || typeof store.settings.scanSetEnabled !== 'object') {
+    store.settings.scanSetEnabled = {}
   }
   return store
 }
@@ -57,6 +82,30 @@ export async function setAutomationMode(mode: 'auto' | 'review') {
 export async function listReviewQueue() {
   const store = await readStore()
   return store.reviewQueue
+}
+
+export async function getSettings() {
+  const store = await readStore()
+  return store.settings
+}
+
+export async function saveSettings(settings: any) {
+  const store = await readStore()
+  store.settings = { ...store.settings, ...(settings || {}) }
+  await writeStore(store)
+  return store.settings
+}
+
+export async function listRules() {
+  const store = await readStore()
+  return store.rules
+}
+
+export async function saveRules(rules: any[]) {
+  const store = await readStore()
+  store.rules = Array.isArray(rules) ? rules : []
+  await writeStore(store)
+  return store.rules
 }
 
 export async function enqueueProposedAction(action: any) {
