@@ -11,6 +11,7 @@ import {
   PiHardDrive,
   PiDesktop
 } from 'react-icons/pi'
+import { buildSmartGroups } from './grouping'
 
 const DEFAULT_MAX_SIZE_MB = 250
 
@@ -80,6 +81,7 @@ export default function App() {
   const [showScanDetails, setShowScanDetails] = useState(false)
 
   const suggestions = analysis.suggestions || []
+  const smartGroups = useMemo(() => buildSmartGroups(scanResult.files || []), [scanResult.files])
 
   useEffect(() => {
     if (view === 'activity') {
@@ -1242,6 +1244,44 @@ export default function App() {
             <span>Keep</span>
           </div>
         </div>
+
+        <section className="section">
+          <div className="section-header">
+            <h2>Smart groups</h2>
+            <p className="muted">Suggestions only — no files will be moved or renamed.</p>
+          </div>
+          {smartGroups.length ? (
+            <div className="group-grid">
+              {smartGroups.map((group) => (
+                <details className="group-card" key={group.id}>
+                  <summary>
+                    <div>
+                      <div className="group-title">{group.title}</div>
+                      <div className="group-meta">
+                        <span>{group.files.length} files</span>
+                        {group.reason.map((reason) => (
+                          <span key={reason}>{reason}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </summary>
+                  <div className="group-body">
+                    {group.files.map((file) => (
+                      <div className="group-file" key={file.path}>
+                        <span className="mono">{file.relPath || file.name}</span>
+                        <span className="muted">
+                          {formatBytes(file.size)} · {formatLocalTime(file.mtimeMs)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No smart groups suggested for this scan.</p>
+          )}
+        </section>
 
         {['move-to-archive', 'move-to-trash', 'keep'].map((type) => (
           <section className="section" key={type}>
