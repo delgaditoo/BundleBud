@@ -18,22 +18,22 @@ import {
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-let mainWindow
-let desktopWatcher = null
-let downloadsWatcher = null
-const downloadsInflight = new Map()
+let mainWindow: BrowserWindow | null
+let desktopWatcher: chokidar.FSWatcher | null = null
+let downloadsWatcher: chokidar.FSWatcher | null = null
+const downloadsInflight = new Map<string, boolean>()
 
 function isDesktopWatcherRunning() {
   return Boolean(desktopWatcher)
 }
 
-function shouldIgnoreDesktopFile(targetPath) {
+function shouldIgnoreDesktopFile(targetPath: string) {
   const base = path.basename(targetPath)
   if (base === '.DS_Store') return true
   return base.startsWith('.')
 }
 
-function shouldIgnoreDownloadsFile(targetPath) {
+function shouldIgnoreDownloadsFile(targetPath: string) {
   const base = path.basename(targetPath)
   if (base === '.DS_Store') return true
   if (base.startsWith('.')) return true
@@ -61,7 +61,7 @@ async function startDownloadsWatcher() {
     ignored: (targetPath) => shouldIgnoreDownloadsFile(targetPath)
   })
 
-  const handleCandidate = async (filePath) => {
+  const handleCandidate = async (filePath: string) => {
     if (shouldIgnoreDownloadsFile(filePath)) return
     if (downloadsInflight.has(filePath)) return
     downloadsInflight.set(filePath, true)
@@ -101,7 +101,7 @@ async function startDesktopWatcher() {
     ignored: (targetPath) => shouldIgnoreDesktopFile(targetPath)
   })
 
-  const handleDesktopCandidate = async (filePath) => {
+  const handleDesktopCandidate = async (filePath: string) => {
     if (shouldIgnoreDesktopFile(filePath)) return
     try {
       await processFile(filePath, 'desktop')
@@ -139,7 +139,7 @@ async function getLastMoveAction(limit = 300) {
   return null
 }
 
-async function ensureUniqueDestination(destPath) {
+async function ensureUniqueDestination(destPath: string) {
   const ext = path.extname(destPath)
   const base = path.basename(destPath, ext)
   const dir = path.dirname(destPath)
@@ -156,7 +156,7 @@ async function ensureUniqueDestination(destPath) {
   }
 }
 
-async function findQueuedAction(actionId) {
+async function findQueuedAction(actionId: string) {
   const queue = await listReviewQueue()
   return queue.find((item) => item.id === actionId) || null
 }
@@ -204,7 +204,7 @@ app.on('before-quit', async () => {
 })
 
 ipcMain.handle('select-folder', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await dialog.showOpenDialog(mainWindow!, {
     properties: ['openDirectory']
   })
   if (result.canceled) return null
@@ -322,10 +322,10 @@ ipcMain.handle('activity:undoLastMove', async () => {
     await fs.rename(toPath, finalDestination)
   } catch (err) {
     status = 'error'
-    errorMessage = err?.message || String(err)
+    errorMessage = (err as Error)?.message || String(err)
   }
 
-  const undoEntry = {
+  const undoEntry: any = {
     id: randomUUID(),
     ts: Date.now(),
     kind: 'action',

@@ -7,11 +7,11 @@ export const title = 'Move archives to Documents/Archives'
 export const enabled = true
 export const priority = 30
 
-export function match(fileInfo) {
+export function match(fileInfo: any) {
   return ARCHIVE_EXTENSIONS.has(fileInfo?.ext)
 }
 
-export function plan(fileInfo) {
+export function plan(fileInfo: any) {
   const targets = getRuleTargets()
   return {
     action: 'move',

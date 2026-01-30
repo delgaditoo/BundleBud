@@ -1,24 +1,64 @@
 import fs from 'fs/promises'
 import path from 'path'
-import { appendEntry } from './ledger.js'
 import { randomUUID } from 'crypto'
+import { appendEntry } from './ledger.js'
 import { applyRules } from '../rules/index.js'
 import { getAutomationMode, enqueueProposedAction } from './automationStore.js'
 
-const inflight = new Set()
-const recentProcessed = new Map()
+type SourceType = 'desktop' | 'downloads'
+
+type FileInfo = {
+  path: string
+  name: string
+  ext: string
+  sizeBytes: number
+  mtimeMs: number
+  source: SourceType
+  detectedAt: number
+}
+
+type RuleMatch = {
+  rule: { id: string; title?: string }
+  plan: {
+    action: 'move'
+    from: string
+    toDir: string
+    filename?: string
+    reason?: string
+  }
+}
+
+type ProposedAction = {
+  id: string
+  createdAt: number
+  ruleId: string
+  source: SourceType
+  fromPath: string
+  toPath: string
+  reason: string
+  sizeBytes: number
+  status: 'queued' | 'applied' | 'rejected' | 'error'
+}
+
+type StabilityConfig = { timeoutMs: number; intervalMs: number }
+
+type StabilityResult = { stable: boolean; size: number }
+
+const inflight = new Set<string>()
+const recentProcessed = new Map<string, number>()
 const DEDUP_WINDOW_MS = 2000
 
-const STABILITY_BY_SOURCE = {
+const STABILITY_BY_SOURCE: Record<SourceType, StabilityConfig> = {
   desktop: { timeoutMs: 5000, intervalMs: 300 },
   downloads: { timeoutMs: 15000, intervalMs: 800 }
 }
 
-async function waitUntilStable(filePath, { timeoutMs, intervalMs }) {
+async function waitUntilStable(filePath: string, { timeoutMs, intervalMs }: StabilityConfig): Promise<StabilityResult> {
   const start = Date.now()
-  let previousSize = null
+  let previousSize: number | null = null
+
   while (Date.now() - start < timeoutMs) {
-    let firstSize
+    let firstSize: number
     try {
       const stat = await fs.stat(filePath)
       if (!stat.isFile()) return { stable: false, size: 0 }
@@ -26,11 +66,14 @@ async function waitUntilStable(filePath, { timeoutMs, intervalMs }) {
     } catch {
       return { stable: false, size: 0 }
     }
+
     if (previousSize !== null && firstSize === previousSize) {
       return { stable: true, size: firstSize }
     }
+
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
-    let secondSize
+
+    let secondSize: number
     try {
       const stat = await fs.stat(filePath)
       if (!stat.isFile()) return { stable: false, size: 0 }
@@ -38,20 +81,24 @@ async function waitUntilStable(filePath, { timeoutMs, intervalMs }) {
     } catch {
       return { stable: false, size: 0 }
     }
+
     if (firstSize === secondSize) {
       return { stable: true, size: secondSize }
     }
+
     previousSize = secondSize
   }
+
   return { stable: false, size: 0 }
 }
 
-async function ensureUniqueDestination(destPath) {
+async function ensureUniqueDestination(destPath: string) {
   const ext = path.extname(destPath)
   const base = path.basename(destPath, ext)
   const dir = path.dirname(destPath)
   let candidate = destPath
   let counter = 2
+
   while (true) {
     try {
       await fs.access(candidate)
@@ -63,17 +110,17 @@ async function ensureUniqueDestination(destPath) {
   }
 }
 
-function shouldDedup(filePath) {
+function shouldDedup(filePath: string) {
   const last = recentProcessed.get(filePath)
   if (!last) return false
   return Date.now() - last < DEDUP_WINDOW_MS
 }
 
-function markProcessed(filePath) {
+function markProcessed(filePath: string) {
   recentProcessed.set(filePath, Date.now())
 }
 
-function buildProposedAction({ fileInfo, rule, plan }) {
+function buildProposedAction({ fileInfo, rule, plan }: { fileInfo: FileInfo; rule: RuleMatch['rule']; plan: RuleMatch['plan'] }): ProposedAction {
   const filename = plan.filename || fileInfo.name
   return {
     id: randomUUID(),
@@ -88,10 +135,10 @@ function buildProposedAction({ fileInfo, rule, plan }) {
   }
 }
 
-export async function executeMoveAction(proposedAction) {
+export async function executeMoveAction(proposedAction: ProposedAction) {
   const targetDir = path.dirname(proposedAction.toPath)
   let finalDestination = proposedAction.toPath
-  let status = 'success'
+  let status: 'success' | 'error' = 'success'
   let errorMessage = ''
 
   try {
@@ -100,10 +147,10 @@ export async function executeMoveAction(proposedAction) {
     await fs.rename(proposedAction.fromPath, finalDestination)
   } catch (err) {
     status = 'error'
-    errorMessage = err?.message || String(err)
+    errorMessage = (err as Error)?.message || String(err)
   }
 
-  const actionEntry = {
+  const actionEntry: any = {
     id: randomUUID(),
     ts: Date.now(),
     kind: 'action',
@@ -130,7 +177,7 @@ export async function executeMoveAction(proposedAction) {
   return { status, finalDestination, errorMessage }
 }
 
-export async function processFile(filePath, source) {
+export async function processFile(filePath: string, source: SourceType) {
   if (!filePath || !source) return { ok: false, reason: 'missing-args' }
   if (inflight.has(filePath)) return { ok: false, reason: 'inflight' }
   if (shouldDedup(filePath)) return { ok: false, reason: 'dedup' }
@@ -148,7 +195,7 @@ export async function processFile(filePath, source) {
     const stat = await fs.stat(filePath)
     if (!stat.isFile()) return { ok: false, reason: 'not-file' }
 
-    const fileInfo = {
+    const fileInfo: FileInfo = {
       path: filePath,
       name: path.basename(filePath),
       ext: path.extname(filePath).toLowerCase(),
@@ -158,7 +205,7 @@ export async function processFile(filePath, source) {
       detectedAt
     }
 
-    const match = applyRules(fileInfo)
+    const match = applyRules(fileInfo) as RuleMatch | null
 
     if (!match) {
       await appendEntry({

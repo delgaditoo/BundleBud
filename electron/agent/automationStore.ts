@@ -4,15 +4,15 @@ import { app } from 'electron'
 
 const STORE_FILENAME = 'automation.json'
 const DEFAULT_STORE = {
-  automationMode: 'review',
-  reviewQueue: []
+  automationMode: 'review' as 'auto' | 'review',
+  reviewQueue: [] as any[]
 }
 
 function getStorePath() {
   return path.join(app.getPath('userData'), STORE_FILENAME)
 }
 
-function normalizeStore(data) {
+function normalizeStore(data: any) {
   const store = { ...DEFAULT_STORE, ...data }
   if (store.automationMode !== 'auto' && store.automationMode !== 'review') {
     store.automationMode = DEFAULT_STORE.automationMode
@@ -30,13 +30,13 @@ async function readStore() {
     if (!raw.trim()) return { ...DEFAULT_STORE }
     const parsed = JSON.parse(raw)
     return normalizeStore(parsed)
-  } catch (err) {
+  } catch (err: any) {
     if (err?.code === 'ENOENT') return { ...DEFAULT_STORE }
     return { ...DEFAULT_STORE }
   }
 }
 
-async function writeStore(store) {
+async function writeStore(store: any) {
   const storePath = getStorePath()
   await fs.mkdir(path.dirname(storePath), { recursive: true })
   await fs.writeFile(storePath, JSON.stringify(store, null, 2), 'utf8')
@@ -47,7 +47,7 @@ export async function getAutomationMode() {
   return store.automationMode
 }
 
-export async function setAutomationMode(mode) {
+export async function setAutomationMode(mode: 'auto' | 'review') {
   const store = await readStore()
   store.automationMode = mode === 'auto' ? 'auto' : 'review'
   await writeStore(store)
@@ -59,16 +59,16 @@ export async function listReviewQueue() {
   return store.reviewQueue
 }
 
-export async function enqueueProposedAction(action) {
+export async function enqueueProposedAction(action: any) {
   const store = await readStore()
   store.reviewQueue.push(action)
   await writeStore(store)
   return action
 }
 
-export async function updateProposedAction(actionId, updates) {
+export async function updateProposedAction(actionId: string, updates: any) {
   const store = await readStore()
-  const index = store.reviewQueue.findIndex((item) => item.id === actionId)
+  const index = store.reviewQueue.findIndex((item: any) => item.id === actionId)
   if (index === -1) return null
   store.reviewQueue[index] = { ...store.reviewQueue[index], ...updates }
   await writeStore(store)
@@ -77,5 +77,5 @@ export async function updateProposedAction(actionId, updates) {
 
 export async function getQueuedReviewCount() {
   const store = await readStore()
-  return store.reviewQueue.filter((item) => item.status === 'queued').length
+  return store.reviewQueue.filter((item: any) => item.status === 'queued').length
 }

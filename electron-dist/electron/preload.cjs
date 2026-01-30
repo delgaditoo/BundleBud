@@ -1,0 +1,29 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const electron_1 = require("electron");
+electron_1.contextBridge.exposeInMainWorld('api', {
+    selectFolder: () => electron_1.ipcRenderer.invoke('select-folder'),
+    scanFiles: (folderPath, options) => electron_1.ipcRenderer.invoke('scan-files', folderPath, options),
+    analyzeDuplicates: (files, options) => electron_1.ipcRenderer.invoke('analyze-duplicates', files, options),
+    executePlan: (plan) => electron_1.ipcRenderer.invoke('execute-plan', plan),
+    revealInFinder: (targetPath) => electron_1.ipcRenderer.invoke('reveal-in-finder', targetPath),
+    openExternal: (url) => electron_1.ipcRenderer.invoke('open-external', url),
+    openReportFolder: (reportPath) => electron_1.ipcRenderer.invoke('open-report-folder', reportPath),
+    getActivity: (limit) => electron_1.ipcRenderer.invoke('activity:getRecent', limit),
+    clearActivity: () => electron_1.ipcRenderer.invoke('activity:clear'),
+    addTestActivity: () => electron_1.ipcRenderer.invoke('activity:addTestEntry'),
+    canUndo: () => electron_1.ipcRenderer.invoke('activity:canUndo'),
+    undoLastMove: () => electron_1.ipcRenderer.invoke('activity:undoLastMove'),
+    getDashboardStats: () => electron_1.ipcRenderer.invoke('dashboard:getStats'),
+    getAutomationMode: () => electron_1.ipcRenderer.invoke('automation:getMode'),
+    setAutomationMode: (mode) => electron_1.ipcRenderer.invoke('automation:setMode', mode),
+    listReviewQueue: () => electron_1.ipcRenderer.invoke('automation:listQueue'),
+    applyProposedAction: (actionId) => electron_1.ipcRenderer.invoke('automation:apply', actionId),
+    rejectProposedAction: (actionId) => electron_1.ipcRenderer.invoke('automation:reject', actionId),
+    startDesktopWatcher: () => electron_1.ipcRenderer.invoke('desktop-watcher:start'),
+    stopDesktopWatcher: () => electron_1.ipcRenderer.invoke('desktop-watcher:stop'),
+    getDesktopWatcherStatus: () => electron_1.ipcRenderer.invoke('desktop-watcher:status'),
+    startDownloadsWatcher: () => electron_1.ipcRenderer.invoke('downloads-watcher:start'),
+    stopDownloadsWatcher: () => electron_1.ipcRenderer.invoke('downloads-watcher:stop'),
+    getDownloadsWatcherStatus: () => electron_1.ipcRenderer.invoke('downloads-watcher:status')
+});

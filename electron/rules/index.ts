@@ -10,7 +10,7 @@ export function getEnabledRules() {
     .sort((a, b) => (a.priority || 0) - (b.priority || 0))
 }
 
-export function applyRules(fileInfo) {
+export function applyRules(fileInfo: any) {
   const rules = getEnabledRules()
   for (const rule of rules) {
     if (rule.match(fileInfo)) {

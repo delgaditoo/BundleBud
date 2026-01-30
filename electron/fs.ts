@@ -17,25 +17,24 @@ const DEFAULT_EXCLUDES = new Set([
 
 function toTimestamp(value = new Date()) {
   const date = new Date(value)
-  const pad = (n) => String(n).padStart(2, '0')
+  const pad = (n: number) => String(n).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`
 }
 
-
-export async function scanFiles(root, options = {}) {
+export async function scanFiles(root: string, options: any = {}) {
   const excludes = new Set(DEFAULT_EXCLUDES)
   for (const extra of options.excludes || []) {
     excludes.add(extra)
   }
   const maxFiles = Number.isFinite(options.maxFiles) ? options.maxFiles : 5000
 
-  const results = []
+  const results: any[] = []
   let truncated = false
   const stack = [root]
 
   while (stack.length) {
-    const current = stack.pop()
-    let entries
+    const current = stack.pop() as string
+    let entries: any
 
     try {
       entries = await fs.readdir(current, { withFileTypes: true })
@@ -80,7 +79,7 @@ export async function scanFiles(root, options = {}) {
   return { files: results, truncated, maxFiles }
 }
 
-async function hashFile(filePath) {
+async function hashFile(filePath: string) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256')
     const stream = createReadStream(filePath)
@@ -91,13 +90,13 @@ async function hashFile(filePath) {
   })
 }
 
-export async function analyzeDuplicates(files = [], options = {}) {
+export async function analyzeDuplicates(files: any[] = [], options: any = {}) {
   const maxSizeMB = Number.isFinite(options.maxSizeMB) ? options.maxSizeMB : 250
   const maxSizeBytes = maxSizeMB * 1024 * 1024
   const runId = options.runId || toTimestamp()
 
-  const hashBuckets = new Map()
-  const suggestions = []
+  const hashBuckets = new Map<string, any[]>()
+  const suggestions: any[] = []
 
   for (const file of files) {
     if (file.size > maxSizeBytes) {
@@ -106,24 +105,24 @@ export async function analyzeDuplicates(files = [], options = {}) {
         path: file.path,
         relPath: file.relPath,
         action: 'keep',
-        reason: `Zu groß zum Hashing in MVP (>${maxSizeMB} MB)`
+        reason: `Too large to hash in MVP (>${maxSizeMB} MB)`
       })
       continue
     }
 
     try {
-      const digest = await hashFile(file.path)
+      const digest = (await hashFile(file.path)) as string
       if (!hashBuckets.has(digest)) {
         hashBuckets.set(digest, [])
       }
-      hashBuckets.get(digest).push(file)
+      hashBuckets.get(digest)!.push(file)
     } catch (error) {
       suggestions.push({
         file: file.name,
         path: file.path,
         relPath: file.relPath,
         action: 'keep',
-        reason: 'Hashing fehlgeschlagen'
+        reason: 'Hashing failed'
       })
     }
   }
@@ -134,13 +133,13 @@ export async function analyzeDuplicates(files = [], options = {}) {
     const sorted = [...group].sort((a, b) => b.mtimeMs - a.mtimeMs)
     const [keepFile, ...duplicates] = sorted
 
-      suggestions.push({
-        file: keepFile.name,
-        path: keepFile.path,
-        relPath: keepFile.relPath,
-        action: 'keep',
-        reason: 'Neueste Datei in Duplikat-Gruppe'
-      })
+    suggestions.push({
+      file: keepFile.name,
+      path: keepFile.path,
+      relPath: keepFile.relPath,
+      action: 'keep',
+      reason: 'Newest file in duplicate group'
+    })
 
     for (const duplicate of duplicates) {
       suggestions.push({
@@ -148,7 +147,7 @@ export async function analyzeDuplicates(files = [], options = {}) {
         path: duplicate.path,
         relPath: duplicate.relPath,
         action: 'move-to-archive',
-        reason: 'Duplikat (ältere Version)',
+        reason: 'Duplicate (older version)',
         targetPath: path.join('_Archive_AI_Organizer', runId, duplicate.relPath)
       })
     }
@@ -161,11 +160,11 @@ export async function analyzeDuplicates(files = [], options = {}) {
   }
 }
 
-async function moveFileSafe(source, destination) {
+async function moveFileSafe(source: string, destination: string) {
   await fs.mkdir(path.dirname(destination), { recursive: true })
   try {
     await fs.rename(source, destination)
-  } catch (error) {
+  } catch (error: any) {
     if (error.code === 'EXDEV') {
       await fs.copyFile(source, destination)
       await fs.unlink(source)
@@ -175,13 +174,13 @@ async function moveFileSafe(source, destination) {
   }
 }
 
-export async function executePlan(plan = {}) {
+export async function executePlan(plan: any = {}) {
   const { folderPath, runId = toTimestamp(), items = [] } = plan
   const archiveRoot = folderPath
     ? path.join(folderPath, '_Archive_AI_Organizer', runId)
     : null
 
-  const results = []
+  const results: any[] = []
 
   for (const item of items) {
     if (!item || !item.path) continue
@@ -219,7 +218,7 @@ export async function executePlan(plan = {}) {
         await moveFileSafe(item.path, destination)
         results.push({ file: item.file, action: 'move-to-archive', success: true })
       }
-    } catch (error) {
+    } catch (error: any) {
       results.push({ file: item.file, action: item.action, success: false, error: error.message })
     }
   }

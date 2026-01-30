@@ -22,8 +22,16 @@ export async function getDashboardStats() {
   let weekMovedFiles = 0
   let weekMovedBytes = 0
 
-  const topRulesMap = new Map()
-  const recentActions = []
+  const topRulesMap = new Map<string, number>()
+  const recentActions: Array<{
+    ts: number
+    title: string
+    status: string
+    from?: string
+    to?: string
+    ruleId?: string
+    sizeBytes?: number
+  }> = []
   let reviewQueueCount = 0
 
   for (const entry of entries) {

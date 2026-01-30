@@ -5,11 +5,11 @@ export const title = 'Move PDFs to Documents/PDF'
 export const enabled = true
 export const priority = 20
 
-export function match(fileInfo) {
+export function match(fileInfo: any) {
   return fileInfo?.ext === '.pdf'
 }
 
-export function plan(fileInfo) {
+export function plan(fileInfo: any) {
   const targets = getRuleTargets()
   return {
     action: 'move',

@@ -8,7 +8,7 @@ function getLedgerPath() {
   return path.join(app.getPath('userData'), LEDGER_FILENAME)
 }
 
-export async function appendEntry(entry) {
+export async function appendEntry(entry: any) {
   const ledgerPath = getLedgerPath()
   await fs.mkdir(path.dirname(ledgerPath), { recursive: true })
   const line = `${JSON.stringify(entry)}\n`
@@ -22,7 +22,7 @@ export async function readRecent(limit = 50) {
     if (!raw.trim()) return []
     const lines = raw.split('\n').filter(Boolean)
     const slice = lines.slice(-Math.max(0, limit))
-    const entries = []
+    const entries: any[] = []
     for (const line of slice) {
       try {
         entries.push(JSON.parse(line))
@@ -31,7 +31,7 @@ export async function readRecent(limit = 50) {
       }
     }
     return entries
-  } catch (err) {
+  } catch (err: any) {
     if (err?.code === 'ENOENT') return []
     throw err
   }
