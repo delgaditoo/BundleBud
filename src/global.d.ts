@@ -31,6 +31,9 @@ declare global {
       getDownloadsWatcherStatus: () => Promise<{ running: boolean }>
       getSystemInfo: () => Promise<any>
       getScanConfig: () => Promise<any>
+      createSandbox: () => Promise<{ ok: boolean; root?: string; error?: string | null }>
+      resetSandbox: () => Promise<{ ok: boolean; root?: string; error?: string | null }>
+      openSandboxFolder: () => Promise<{ ok: boolean; root?: string; error?: string | null }>
     }
   }
 }

@@ -29,6 +29,72 @@ let downloadsWatcher: chokidar.FSWatcher | null = null
 const downloadsInflight = new Map<string, boolean>()
 const execFileAsync = promisify(execFile)
 
+function getSandboxRoot() {
+  return path.join(app.getPath('documents'), 'BundleBud', 'Sandbox')
+}
+
+async function sandboxExists() {
+  try {
+    const stats = await fs.stat(getSandboxRoot())
+    return stats.isDirectory()
+  } catch {
+    return false
+  }
+}
+
+async function createSandboxLibrary() {
+  const root = getSandboxRoot()
+  await fs.mkdir(root, { recursive: true })
+
+  const folders = [
+    'Downloads',
+    path.join('Projects', 'Uni'),
+    'Screenshots',
+    'Invoices',
+    'Archives',
+    'Mixed'
+  ]
+
+  for (const folder of folders) {
+    await fs.mkdir(path.join(root, folder), { recursive: true })
+  }
+
+  const now = Date.now()
+  const days = (count: number) => now - count * 24 * 60 * 60 * 1000
+
+  const files = [
+    { rel: 'Invoices/invoice_2025-03-01.pdf', content: 'Invoice March 2025', mtime: days(15) },
+    { rel: 'Invoices/receipt_2025-02-18.pdf', content: 'Receipt Feb 2025', mtime: days(30) },
+    { rel: 'Screenshots/screenshot_2025-03-02_12-31-10.png', content: 'PNG', mtime: days(1) },
+    { rel: 'Screenshots/screenshot_2025-02-20_09-14-02.png', content: 'PNG', mtime: days(25) },
+    { rel: 'Downloads/project_backup_2025-01-10.zip', content: '', mtime: days(60) },
+    { rel: 'Projects/Uni/notes_project_alpha.txt', content: 'Project alpha notes', mtime: days(5) },
+    { rel: 'Projects/Uni/meeting_2025-03-02.md', content: '# Meeting notes', mtime: days(2) },
+    { rel: 'Mixed/invoice_2025-03-01 (2).pdf', content: 'Invoice March 2025 duplicate', mtime: days(14) },
+    { rel: 'Mixed/receipt_2025-02-18 (2).pdf', content: 'Receipt Feb 2025 duplicate', mtime: days(29) },
+    { rel: 'Mixed/screenshot_2025-03-02_12-31-10 (2).png', content: 'PNG duplicate', mtime: days(1) },
+    { rel: 'Mixed/readme.txt', content: 'Mixed folder readme', mtime: days(7) },
+    { rel: 'Downloads/notes_project_alpha.txt', content: 'Project alpha notes copy', mtime: days(4) },
+    { rel: 'Downloads/meeting_2025-03-02 (2).md', content: '# Meeting notes duplicate', mtime: days(2) }
+  ]
+
+  for (const file of files) {
+    const fullPath = path.join(root, file.rel)
+    await fs.mkdir(path.dirname(fullPath), { recursive: true })
+    await fs.writeFile(fullPath, file.content, 'utf8')
+    const time = file.mtime || now
+    await fs.utimes(fullPath, time / 1000, time / 1000)
+  }
+
+  return root
+}
+
+async function resetSandboxLibrary() {
+  const root = getSandboxRoot()
+  await fs.rm(root, { recursive: true, force: true })
+  return root
+}
+
 async function listExternalVolumes() {
   if (process.platform !== 'darwin') return []
   try {
@@ -312,11 +378,14 @@ ipcMain.handle('downloads-watcher:status', async () => {
 })
 
 ipcMain.handle('scan:getConfig', async () => {
+  const sandboxRoot = getSandboxRoot()
+  const hasSandbox = await sandboxExists()
   const sets = [
     { id: 'desktop', label: 'Desktop', path: app.getPath('desktop') },
     { id: 'downloads', label: 'Downloads', path: app.getPath('downloads') },
     { id: 'documents', label: 'Documents', path: app.getPath('documents') },
     { id: 'pictures', label: 'Pictures', path: app.getPath('pictures') },
+    { id: 'sandbox', label: 'Sandbox', path: sandboxRoot },
     { id: 'external', label: 'External drives', path: null }
   ]
 
@@ -325,8 +394,43 @@ ipcMain.handle('scan:getConfig', async () => {
     excludeNames: ['node_modules', '.git', 'Library', 'System'],
     excludeHiddenDefault: true,
     excludePaths: [app.getPath('userData')],
-    externalVolumes: await listExternalVolumes()
+    externalVolumes: await listExternalVolumes(),
+    sandboxRoot,
+    sandboxExists: hasSandbox
   }
+})
+
+ipcMain.handle('sandbox:create', async () => {
+  const root = await createSandboxLibrary()
+  await appendEntry({
+    id: randomUUID(),
+    ts: Date.now(),
+    kind: 'event',
+    title: 'Sandbox created',
+    path: root,
+    status: 'info'
+  })
+  return { ok: true, root }
+})
+
+ipcMain.handle('sandbox:reset', async () => {
+  const root = await resetSandboxLibrary()
+  await appendEntry({
+    id: randomUUID(),
+    ts: Date.now(),
+    kind: 'event',
+    title: 'Sandbox reset',
+    path: root,
+    status: 'info'
+  })
+  return { ok: true, root }
+})
+
+ipcMain.handle('sandbox:open', async () => {
+  const root = getSandboxRoot()
+  await fs.mkdir(root, { recursive: true })
+  const result = await shell.openPath(root)
+  return { ok: !result, error: result || null, root }
 })
 
 ipcMain.handle('system:getInfo', async () => {

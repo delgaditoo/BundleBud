@@ -28,5 +28,8 @@ contextBridge.exposeInMainWorld('api', {
   stopDownloadsWatcher: () => ipcRenderer.invoke('downloads-watcher:stop'),
   getDownloadsWatcherStatus: () => ipcRenderer.invoke('downloads-watcher:status'),
   getSystemInfo: () => ipcRenderer.invoke('system:getInfo'),
-  getScanConfig: () => ipcRenderer.invoke('scan:getConfig')
+  getScanConfig: () => ipcRenderer.invoke('scan:getConfig'),
+  createSandbox: () => ipcRenderer.invoke('sandbox:create'),
+  resetSandbox: () => ipcRenderer.invoke('sandbox:reset'),
+  openSandboxFolder: () => ipcRenderer.invoke('sandbox:open')
 })

@@ -131,6 +131,8 @@ export default function App() {
   const [rulesError, setRulesError] = useState('')
   const [selectedRuleId, setSelectedRuleId] = useState(null)
   const [rulePreview, setRulePreview] = useState({ matches: [], error: '', ran: false })
+  const [sandboxBusy, setSandboxBusy] = useState(false)
+  const [sandboxError, setSandboxError] = useState('')
 
   const suggestions = analysis.suggestions || []
   const smartGroups = useMemo(() => buildSmartGroups(scanResult.files || []), [scanResult.files])
@@ -154,6 +156,9 @@ export default function App() {
     if (view === 'rules') {
       loadRules()
       loadAutomationMode()
+    }
+    if (view === 'sandbox') {
+      loadScanConfig()
     }
     if (view === 'system') {
       loadSystemInfo()
@@ -467,7 +472,7 @@ export default function App() {
       setScanConfig(config)
       const defaults = (config?.sets || []).map((set) => ({
         ...set,
-        enabled: set.id !== 'external'
+        enabled: set.id !== 'external' && (set.id !== 'sandbox' || config?.sandboxExists)
       }))
       setScanSets(defaults)
       setIncludeHidden(!(config?.excludeHiddenDefault ?? true))
@@ -475,6 +480,52 @@ export default function App() {
       setShowScanDetails(false)
     } catch {
       setScanConfig(null)
+    }
+  }
+
+  async function handleCreateSandbox() {
+    setSandboxError('')
+    setSandboxBusy(true)
+    try {
+      if (!api?.createSandbox) {
+        throw new Error('Sandbox bridge unavailable. Please restart the app.')
+      }
+      await api.createSandbox()
+      await loadScanConfig()
+      await loadActivity(50)
+    } catch (err) {
+      setSandboxError(err?.message || 'Failed to create sandbox.')
+    } finally {
+      setSandboxBusy(false)
+    }
+  }
+
+  async function handleResetSandbox() {
+    setSandboxError('')
+    setSandboxBusy(true)
+    try {
+      if (!api?.resetSandbox) {
+        throw new Error('Sandbox bridge unavailable. Please restart the app.')
+      }
+      await api.resetSandbox()
+      await loadScanConfig()
+      await loadActivity(50)
+    } catch (err) {
+      setSandboxError(err?.message || 'Failed to reset sandbox.')
+    } finally {
+      setSandboxBusy(false)
+    }
+  }
+
+  async function handleOpenSandbox() {
+    setSandboxError('')
+    try {
+      if (!api?.openSandboxFolder) {
+        throw new Error('Sandbox bridge unavailable. Please restart the app.')
+      }
+      await api.openSandboxFolder()
+    } catch (err) {
+      setSandboxError(err?.message || 'Failed to open sandbox.')
     }
   }
 
@@ -716,7 +767,7 @@ export default function App() {
       setScanSets((prev) =>
         prev.map((set) => ({
           ...set,
-          enabled: set.id !== 'external'
+          enabled: set.id !== 'external' && (set.id !== 'sandbox' || scanConfig?.sandboxExists)
         }))
       )
       return
@@ -725,7 +776,9 @@ export default function App() {
       setScanSets((prev) =>
         prev.map((set) => ({
           ...set,
-          enabled: ['desktop', 'downloads', 'pictures', 'documents'].includes(set.id)
+          enabled:
+            ['desktop', 'downloads', 'pictures', 'documents'].includes(set.id) ||
+            (set.id === 'sandbox' && scanConfig?.sandboxExists)
         }))
       )
       return
@@ -818,6 +871,7 @@ export default function App() {
     { id: 'dashboard', label: 'Dashboard', icon: <PiGauge size={18} /> },
     { id: 'review-queue', label: 'Review Queue', icon: <PiWrench size={18} /> },
     { id: 'rules', label: 'Rules', icon: <PiLightning size={18} /> },
+    { id: 'sandbox', label: 'Sandbox', icon: <PiCpu size={18} /> },
     { id: 'organizer', label: 'Cleaner', icon: <PiBroomBold size={18} /> },
     { id: 'activity', label: 'Activity Ledger', icon: <PiFolder size={18} /> },
     { id: 'system', label: 'System Settings', icon: <PiLaptop size={18} /> }
@@ -847,6 +901,13 @@ export default function App() {
         kicker: 'Automation',
         title: 'Rules',
         subtitle: 'Create, preview, and prioritize your rules.'
+      }
+    }
+    if (view === 'sandbox') {
+      return {
+        kicker: 'Automation',
+        title: 'Sandbox',
+        subtitle: 'Generate a safe test library for scans and rules.'
       }
     }
     if (view === 'activity') {
@@ -1272,6 +1333,52 @@ export default function App() {
             )}
           </div>
         </div>
+      </div>
+    )
+  }
+
+  if (view === 'sandbox') {
+    const sandboxRoot = scanConfig?.sandboxRoot || '—'
+    const sandboxExists = Boolean(scanConfig?.sandboxExists)
+
+    return renderShell(
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Sandbox</h2>
+          <p className="muted">Generate realistic test files without touching real folders.</p>
+        </div>
+
+        {sandboxError ? <div className="error">{sandboxError}</div> : null}
+
+        <section className="section">
+          <div className="summary">
+            <div className="summary-row">
+              <span>Status</span>
+              <span>{sandboxExists ? 'Ready' : 'Not created'}</span>
+            </div>
+            <div className="summary-row">
+              <span>Location</span>
+              <span className="mono">{sandboxRoot}</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="button-row">
+            <button className="secondary" onClick={handleCreateSandbox} disabled={sandboxBusy}>
+              {sandboxBusy ? 'Working…' : 'Create sandbox test library'}
+            </button>
+            <button className="ghost" onClick={handleOpenSandbox} disabled={sandboxBusy}>
+              Open sandbox folder
+            </button>
+            <button className="ghost" onClick={handleResetSandbox} disabled={sandboxBusy}>
+              Reset / Delete sandbox
+            </button>
+          </div>
+          <p className="muted">
+            Sandbox files stay inside <span className="mono">{shortenPath(sandboxRoot)}</span>.
+          </p>
+        </section>
       </div>
     )
   }

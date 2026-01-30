@@ -696,6 +696,12 @@ h2 {
   flex-wrap: wrap;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .label {
   font-weight: 600;
   font-size: 0.9rem;
