@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld('api', {
   getAutomationMode: () => ipcRenderer.invoke('automation:getMode'),
   setAutomationMode: (mode: 'auto' | 'review') => ipcRenderer.invoke('automation:setMode', mode),
   listReviewQueue: () => ipcRenderer.invoke('automation:listQueue'),
+  listRules: () => ipcRenderer.invoke('automation:listRules'),
+  saveRules: (rules: any[]) => ipcRenderer.invoke('automation:saveRules', rules),
+  getSettings: () => ipcRenderer.invoke('automation:getSettings'),
+  saveSettings: (settings: any) => ipcRenderer.invoke('automation:saveSettings', settings),
+  listArchiveItems: () => ipcRenderer.invoke('archive:list'),
+  restoreArchiveItem: (itemId: string) => ipcRenderer.invoke('archive:restore', itemId),
   applyProposedAction: (actionId: string) => ipcRenderer.invoke('automation:apply', actionId),
   rejectProposedAction: (actionId: string) => ipcRenderer.invoke('automation:reject', actionId),
   startDesktopWatcher: () => ipcRenderer.invoke('desktop-watcher:start'),
@@ -26,5 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   stopDownloadsWatcher: () => ipcRenderer.invoke('downloads-watcher:stop'),
   getDownloadsWatcherStatus: () => ipcRenderer.invoke('downloads-watcher:status'),
   getSystemInfo: () => ipcRenderer.invoke('system:getInfo'),
-  getScanConfig: () => ipcRenderer.invoke('scan:getConfig')
+  getScanConfig: () => ipcRenderer.invoke('scan:getConfig'),
+  createSandbox: () => ipcRenderer.invoke('sandbox:create'),
+  resetSandbox: () => ipcRenderer.invoke('sandbox:reset'),
+  openSandboxFolder: () => ipcRenderer.invoke('sandbox:open')
 })

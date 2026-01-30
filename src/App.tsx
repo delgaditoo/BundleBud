@@ -12,8 +12,55 @@ import {
   PiDesktop
 } from 'react-icons/pi'
 import { buildSmartGroups } from './grouping'
+import { evaluateRule, summarizeRule } from '../shared/rules'
 
 const DEFAULT_MAX_SIZE_MB = 250
+const RULE_ATTRIBUTES = [
+  { value: 'name', label: 'Name' },
+  { value: 'extension', label: 'Extension' },
+  { value: 'kind', label: 'Kind' },
+  { value: 'path', label: 'Path contains' },
+  { value: 'size', label: 'Size' },
+  { value: 'date-modified', label: 'Date modified' }
+]
+const RULE_OPERATORS = {
+  name: ['contains', 'is', 'starts-with', 'ends-with', 'matches'],
+  extension: ['is', 'contains', 'starts-with', 'ends-with', 'matches'],
+  kind: ['is'],
+  path: ['contains', 'is', 'starts-with', 'ends-with', 'matches'],
+  size: ['greater-than', 'less-than'],
+  'date-modified': ['before', 'after']
+}
+const OPERATOR_LABELS = {
+  contains: 'contains',
+  is: 'is',
+  'starts-with': 'starts with',
+  'ends-with': 'ends with',
+  matches: 'matches',
+  'greater-than': 'greater than',
+  'less-than': 'less than',
+  before: 'before',
+  after: 'after'
+}
+const KIND_OPTIONS = [
+  { value: 'image', label: 'Image' },
+  { value: 'video', label: 'Video' },
+  { value: 'pdf', label: 'PDF' },
+  { value: 'document', label: 'Document' },
+  { value: 'spreadsheet', label: 'Spreadsheet' },
+  { value: 'presentation', label: 'Presentation' },
+  { value: 'archive', label: 'Archive' },
+  { value: 'code', label: 'Code' },
+  { value: 'audio', label: 'Audio' },
+  { value: 'text', label: 'Text' },
+  { value: 'other', label: 'Other' }
+]
+const SIZE_UNITS = [
+  { value: 'bytes', label: 'Bytes' },
+  { value: 'kb', label: 'KB' },
+  { value: 'mb', label: 'MB' },
+  { value: 'gb', label: 'GB' }
+]
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B'
@@ -79,6 +126,17 @@ export default function App() {
   const [includeHidden, setIncludeHidden] = useState(false)
   const [scanScope, setScanScope] = useState('recommended')
   const [showScanDetails, setShowScanDetails] = useState(false)
+  const [rules, setRules] = useState([])
+  const [rulesLoading, setRulesLoading] = useState(false)
+  const [rulesError, setRulesError] = useState('')
+  const [selectedRuleId, setSelectedRuleId] = useState(null)
+  const [rulePreview, setRulePreview] = useState({ matches: [], error: '', ran: false })
+  const [archiveItems, setArchiveItems] = useState([])
+  const [archiveLoading, setArchiveLoading] = useState(false)
+  const [archiveError, setArchiveError] = useState('')
+  const [sandboxBusy, setSandboxBusy] = useState(false)
+  const [sandboxError, setSandboxError] = useState('')
+  const [settingsReady, setSettingsReady] = useState(false)
 
   const suggestions = analysis.suggestions || []
   const smartGroups = useMemo(() => buildSmartGroups(scanResult.files || []), [scanResult.files])
@@ -99,6 +157,20 @@ export default function App() {
       loadReviewQueue()
       loadAutomationMode()
     }
+    if (view === 'rules') {
+      loadRules()
+      loadAutomationMode()
+    }
+    if (view === 'archive') {
+      loadArchive()
+    }
+    if (view === 'sandbox') {
+      loadScanConfig()
+    }
+    if (view === 'settings') {
+      loadScanConfig()
+      loadAutomationMode()
+    }
     if (view === 'system') {
       loadSystemInfo()
     }
@@ -112,6 +184,11 @@ export default function App() {
       loadScanConfig()
     }
   }, [step])
+
+  useEffect(() => {
+    if (!settingsReady || !scanConfig) return
+    persistSettings().catch(() => {})
+  }, [scanScope, includeHidden, maxSizeMB, scanSets, settingsReady, scanConfig])
 
   async function loadSystemInfo() {
     try {
@@ -213,22 +290,331 @@ export default function App() {
     }
   }
 
+  async function loadRules() {
+    setRulesError('')
+    setRulesLoading(true)
+    try {
+      if (!api?.listRules) {
+        throw new Error('Rules bridge unavailable. Please restart the app.')
+      }
+      const nextRules = await api.listRules()
+      setRules(Array.isArray(nextRules) ? nextRules : [])
+      if (Array.isArray(nextRules) && nextRules.length && !selectedRuleId) {
+        setSelectedRuleId(nextRules[0].id)
+      }
+    } catch (err) {
+      setRulesError(err?.message || 'Failed to load rules.')
+    } finally {
+      setRulesLoading(false)
+    }
+  }
+
+  async function persistRules(nextRules) {
+    setRules(nextRules)
+    setRulesError('')
+    try {
+      if (!api?.saveRules) {
+        throw new Error('Rules bridge unavailable. Please restart the app.')
+      }
+      await api.saveRules(nextRules)
+    } catch (err) {
+      setRulesError(err?.message || 'Failed to save rules.')
+    }
+  }
+
   async function loadScanConfig() {
     try {
       if (!api?.getScanConfig) return
       const config = await api.getScanConfig()
       setScanConfig(config)
+      let settings = null
+      if (api?.getSettings) {
+        settings = await api.getSettings()
+      }
+
       const defaults = (config?.sets || []).map((set) => ({
         ...set,
-        enabled: set.id !== 'external'
+        enabled: set.id !== 'external' && (set.id !== 'sandbox' || config?.sandboxExists)
       }))
-      setScanSets(defaults)
-      setIncludeHidden(!(config?.excludeHiddenDefault ?? true))
-      setScanScope('recommended')
+
+      let nextScope = settings?.scanScope || 'recommended'
+      let nextSets = defaults
+
+      if (nextScope === 'custom' && settings?.scanSetEnabled) {
+        nextSets = defaults.map((set) => ({
+          ...set,
+          enabled: set.id !== 'external' && Boolean(settings.scanSetEnabled[set.id])
+        }))
+      }
+
+      setScanSets(nextSets)
+      setIncludeHidden(
+        typeof settings?.includeHidden === 'boolean'
+          ? settings.includeHidden
+          : !(config?.excludeHiddenDefault ?? true)
+      )
+      setScanScope(nextScope)
+      setMaxSizeMB(Number.isFinite(settings?.maxSizeMB) ? settings.maxSizeMB : DEFAULT_MAX_SIZE_MB)
       setShowScanDetails(false)
+
+      if (nextScope !== 'custom') {
+        applyScope(nextScope)
+      }
+
+      setSettingsReady(true)
     } catch {
       setScanConfig(null)
+      setSettingsReady(false)
     }
+  }
+
+  async function persistSettings() {
+    if (!api?.saveSettings || !scanConfig) return
+    const scanSetEnabled = {}
+    scanSets.forEach((set) => {
+      scanSetEnabled[set.id] = Boolean(set.enabled)
+    })
+    await api.saveSettings({
+      scanScope,
+      includeHidden,
+      maxSizeMB,
+      scanSetEnabled
+    })
+  }
+
+  async function loadArchive() {
+    setArchiveError('')
+    setArchiveLoading(true)
+    try {
+      if (!api?.listArchiveItems) {
+        throw new Error('Archive bridge unavailable. Please restart the app.')
+      }
+      const items = await api.listArchiveItems()
+      setArchiveItems(Array.isArray(items) ? items : [])
+    } catch (err) {
+      setArchiveError(err?.message || 'Failed to load archive.')
+    } finally {
+      setArchiveLoading(false)
+    }
+  }
+
+  async function handleRestoreArchive(itemId) {
+    setArchiveError('')
+    try {
+      if (!api?.restoreArchiveItem) {
+        throw new Error('Restore bridge unavailable. Please restart the app.')
+      }
+      await api.restoreArchiveItem(itemId)
+      await loadArchive()
+      await loadActivity(50)
+    } catch (err) {
+      setArchiveError(err?.message || 'Failed to restore item.')
+    }
+  }
+
+  async function handleCreateSandbox() {
+    setSandboxError('')
+    setSandboxBusy(true)
+    try {
+      if (!api?.createSandbox) {
+        throw new Error('Sandbox bridge unavailable. Please restart the app.')
+      }
+      await api.createSandbox()
+      await loadScanConfig()
+      await loadActivity(50)
+    } catch (err) {
+      setSandboxError(err?.message || 'Failed to create sandbox.')
+    } finally {
+      setSandboxBusy(false)
+    }
+  }
+
+  async function handleResetSandbox() {
+    setSandboxError('')
+    setSandboxBusy(true)
+    try {
+      if (!api?.resetSandbox) {
+        throw new Error('Sandbox bridge unavailable. Please restart the app.')
+      }
+      await api.resetSandbox()
+      await loadScanConfig()
+      await loadActivity(50)
+    } catch (err) {
+      setSandboxError(err?.message || 'Failed to reset sandbox.')
+    } finally {
+      setSandboxBusy(false)
+    }
+  }
+
+  async function handleOpenSandbox() {
+    setSandboxError('')
+    try {
+      if (!api?.openSandboxFolder) {
+        throw new Error('Sandbox bridge unavailable. Please restart the app.')
+      }
+      await api.openSandboxFolder()
+    } catch (err) {
+      setSandboxError(err?.message || 'Failed to open sandbox.')
+    }
+  }
+
+  function createRuleId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+    return `rule-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+  }
+
+  function createCondition() {
+    return {
+      id: createRuleId(),
+      attribute: 'name',
+      operator: 'contains',
+      value: ''
+    }
+  }
+
+  function createAction() {
+    return {
+      id: createRuleId(),
+      type: 'move',
+      targetPath: ''
+    }
+  }
+
+  function createRuleTemplate() {
+    return {
+      id: createRuleId(),
+      name: 'New rule',
+      enabled: true,
+      matchMode: 'all',
+      conditions: [createCondition()],
+      actions: [createAction()]
+    }
+  }
+
+  function updateRule(ruleId, updates) {
+    const nextRules = rules.map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule))
+    persistRules(nextRules)
+  }
+
+  function updateRuleCondition(ruleId, conditionId, updates) {
+    const nextRules = rules.map((rule) => {
+      if (rule.id !== ruleId) return rule
+      return {
+        ...rule,
+        conditions: rule.conditions.map((condition) =>
+          condition.id === conditionId ? { ...condition, ...updates } : condition
+        )
+      }
+    })
+    persistRules(nextRules)
+  }
+
+  function updateRuleAction(ruleId, actionId, updates) {
+    const nextRules = rules.map((rule) => {
+      if (rule.id !== ruleId) return rule
+      return {
+        ...rule,
+        actions: rule.actions.map((action) =>
+          action.id === actionId ? { ...action, ...updates } : action
+        )
+      }
+    })
+    persistRules(nextRules)
+  }
+
+  function addCondition(ruleId) {
+    const nextRules = rules.map((rule) => {
+      if (rule.id !== ruleId) return rule
+      return {
+        ...rule,
+        conditions: [...rule.conditions, createCondition()]
+      }
+    })
+    persistRules(nextRules)
+  }
+
+  function removeCondition(ruleId, conditionId) {
+    const nextRules = rules.map((rule) => {
+      if (rule.id !== ruleId) return rule
+      const nextConditions = rule.conditions.filter((condition) => condition.id !== conditionId)
+      return { ...rule, conditions: nextConditions.length ? nextConditions : [createCondition()] }
+    })
+    persistRules(nextRules)
+  }
+
+  function addAction(ruleId) {
+    const nextRules = rules.map((rule) => {
+      if (rule.id !== ruleId) return rule
+      return {
+        ...rule,
+        actions: [...rule.actions, createAction()]
+      }
+    })
+    persistRules(nextRules)
+  }
+
+  function removeAction(ruleId, actionId) {
+    const nextRules = rules.map((rule) => {
+      if (rule.id !== ruleId) return rule
+      const nextActions = rule.actions.filter((action) => action.id !== actionId)
+      return { ...rule, actions: nextActions.length ? nextActions : [createAction()] }
+    })
+    persistRules(nextRules)
+  }
+
+  function addRule() {
+    const nextRule = createRuleTemplate()
+    const nextRules = [nextRule, ...rules]
+    setSelectedRuleId(nextRule.id)
+    persistRules(nextRules)
+  }
+
+  function deleteRule(ruleId) {
+    const nextRules = rules.filter((rule) => rule.id !== ruleId)
+    persistRules(nextRules)
+    if (selectedRuleId === ruleId) {
+      setSelectedRuleId(nextRules[0]?.id || null)
+    }
+  }
+
+  function reorderRules(dragId, targetId) {
+    if (dragId === targetId) return
+    const currentIndex = rules.findIndex((rule) => rule.id === dragId)
+    const targetIndex = rules.findIndex((rule) => rule.id === targetId)
+    if (currentIndex === -1 || targetIndex === -1) return
+    const nextRules = [...rules]
+    const [moved] = nextRules.splice(currentIndex, 1)
+    nextRules.splice(targetIndex, 0, moved)
+    persistRules(nextRules)
+  }
+
+  async function handlePickFolder(ruleId, actionId) {
+    if (!api?.selectFolder) return
+    const path = await api.selectFolder()
+    if (!path) return
+    updateRuleAction(ruleId, actionId, { targetPath: path })
+  }
+
+  function handlePreview(rule) {
+    if (!scanResult.files.length) {
+      setRulePreview({ matches: [], error: 'Run a scan first to preview this rule.', ran: true })
+      return
+    }
+    const matches = scanResult.files
+      .map((file) => {
+        const result = evaluateRule({ ...rule, enabled: true }, {
+          path: file.path,
+          name: file.name,
+          ext: file.ext,
+          sizeBytes: file.size,
+          mtimeMs: file.mtimeMs
+        })
+        return result.matches
+          ? { file, reasons: result.reasons.length ? result.reasons : ['Rule matched'] }
+          : null
+      })
+      .filter(Boolean)
+    setRulePreview({ matches, error: '', ran: true })
   }
 
   async function handleApplyAction(actionId) {
@@ -469,7 +855,7 @@ export default function App() {
       setScanSets((prev) =>
         prev.map((set) => ({
           ...set,
-          enabled: set.id !== 'external'
+          enabled: set.id !== 'external' && (set.id !== 'sandbox' || scanConfig?.sandboxExists)
         }))
       )
       return
@@ -478,7 +864,9 @@ export default function App() {
       setScanSets((prev) =>
         prev.map((set) => ({
           ...set,
-          enabled: ['desktop', 'downloads', 'pictures', 'documents'].includes(set.id)
+          enabled:
+            ['desktop', 'downloads', 'pictures', 'documents'].includes(set.id) ||
+            (set.id === 'sandbox' && scanConfig?.sandboxExists)
         }))
       )
       return
@@ -562,10 +950,18 @@ export default function App() {
     () => Object.values(selected).filter(Boolean).length,
     [selected]
   )
+  const selectedRule = useMemo(
+    () => rules.find((rule) => rule.id === selectedRuleId) || null,
+    [rules, selectedRuleId]
+  )
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <PiGauge size={18} /> },
     { id: 'review-queue', label: 'Review Queue', icon: <PiWrench size={18} /> },
+    { id: 'rules', label: 'Rules', icon: <PiLightning size={18} /> },
+    { id: 'archive', label: 'Archive', icon: <PiHardDrive size={18} /> },
+    { id: 'sandbox', label: 'Sandbox', icon: <PiCpu size={18} /> },
+    { id: 'settings', label: 'Settings', icon: <PiDesktop size={18} /> },
     { id: 'organizer', label: 'Cleaner', icon: <PiBroomBold size={18} /> },
     { id: 'activity', label: 'Activity Ledger', icon: <PiFolder size={18} /> },
     { id: 'system', label: 'System Settings', icon: <PiLaptop size={18} /> }
@@ -588,6 +984,34 @@ export default function App() {
         kicker: 'Automation',
         title: 'Review Queue',
         subtitle: 'Proposed actions waiting for approval.'
+      }
+    }
+    if (view === 'rules') {
+      return {
+        kicker: 'Automation',
+        title: 'Rules',
+        subtitle: 'Create, preview, and prioritize your rules.'
+      }
+    }
+    if (view === 'archive') {
+      return {
+        kicker: 'Automation',
+        title: 'Archive',
+        subtitle: 'Review archived items and restore safely.'
+      }
+    }
+    if (view === 'sandbox') {
+      return {
+        kicker: 'Automation',
+        title: 'Sandbox',
+        subtitle: 'Generate a safe test library for scans and rules.'
+      }
+    }
+    if (view === 'settings') {
+      return {
+        kicker: 'System',
+        title: 'Settings',
+        subtitle: 'Scan, exclusion, automation, and advanced preferences.'
       }
     }
     if (view === 'activity') {
@@ -726,6 +1150,568 @@ export default function App() {
     )
   }
 
+  if (view === 'rules') {
+    return renderShell(
+      <div className="panel">
+        <div className="panel-header rules-header">
+          <div>
+            <h2>Rules</h2>
+            <p className="muted">Create deterministic rules and preview matches before anything runs.</p>
+          </div>
+          <button className="secondary" onClick={addRule}>
+            New rule
+          </button>
+        </div>
+
+        {rulesError ? <div className="error">{rulesError}</div> : null}
+        {rulesLoading ? <p className="muted">Loading rules…</p> : null}
+
+        <div className="rules-layout">
+          <div className="rules-list">
+            <div className="rules-list-header">
+              <span className="muted">Priority order</span>
+            </div>
+            {rules.length ? (
+              <div className="rules-list-body">
+                {rules.map((rule, index) => (
+                  <div
+                    key={rule.id}
+                    className={`rule-row ${selectedRuleId === rule.id ? 'active' : ''}`}
+                    draggable
+                    onDragStart={(event) => event.dataTransfer.setData('text/plain', rule.id)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const dragId = event.dataTransfer.getData('text/plain')
+                      reorderRules(dragId, rule.id)
+                    }}
+                  >
+                    <button
+                      className="rule-row-main"
+                      onClick={() => {
+                        setSelectedRuleId(rule.id)
+                        setRulePreview({ matches: [], error: '', ran: false })
+                      }}
+                    >
+                      <div className="rule-row-title">
+                        <span>{rule.name}</span>
+                        <span className="muted">#{index + 1}</span>
+                      </div>
+                      <div className="muted">{summarizeRule(rule)}</div>
+                    </button>
+                    <div className="rule-row-actions">
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={!!rule.enabled}
+                          onChange={(event) => updateRule(rule.id, { enabled: event.target.checked })}
+                        />
+                        <span>Enabled</span>
+                      </label>
+                      <button className="ghost small" onClick={() => deleteRule(rule.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">No rules yet. Create one to get started.</p>
+            )}
+          </div>
+
+          <div className="rules-editor">
+            {selectedRule ? (
+              <>
+                <div className="rules-editor-header">
+                  <div className="rules-editor-title">Rule editor</div>
+                  <div className="muted mono">{selectedRule.id}</div>
+                </div>
+
+                <section className="section">
+                  <label className="label">Rule name</label>
+                  <input
+                    className="input"
+                    value={selectedRule.name}
+                    onChange={(event) => updateRule(selectedRule.id, { name: event.target.value })}
+                  />
+                  <label className="label">Match mode</label>
+                  <select
+                    value={selectedRule.matchMode}
+                    onChange={(event) => updateRule(selectedRule.id, { matchMode: event.target.value })}
+                  >
+                    <option value="all">All conditions</option>
+                    <option value="any">Any condition</option>
+                    <option value="none">None of the conditions</option>
+                  </select>
+                </section>
+
+                <section className="section">
+                  <div className="section-header">
+                    <h2>Conditions</h2>
+                    <p className="muted">Attributes must match based on the selected mode.</p>
+                  </div>
+                  {selectedRule.conditions.map((condition) => {
+                    const operatorOptions = RULE_OPERATORS[condition.attribute] || []
+                    return (
+                      <div className="rule-row-editor" key={condition.id}>
+                        <select
+                          value={condition.attribute}
+                          onChange={(event) => {
+                            const nextAttribute = event.target.value
+                            const nextOperator = RULE_OPERATORS[nextAttribute][0]
+                            const updates: any = { attribute: nextAttribute, operator: nextOperator }
+                            if (nextAttribute === 'size' && !condition.unit) updates.unit = 'mb'
+                            if (nextAttribute === 'kind' && !condition.value) updates.value = 'image'
+                            updateRuleCondition(selectedRule.id, condition.id, updates)
+                          }}
+                        >
+                          {RULE_ATTRIBUTES.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={condition.operator}
+                          onChange={(event) =>
+                            updateRuleCondition(selectedRule.id, condition.id, { operator: event.target.value })
+                          }
+                        >
+                          {operatorOptions.map((operator) => (
+                            <option key={operator} value={operator}>
+                              {OPERATOR_LABELS[operator]}
+                            </option>
+                          ))}
+                        </select>
+                        {condition.attribute === 'kind' ? (
+                          <select
+                            value={condition.value}
+                            onChange={(event) =>
+                              updateRuleCondition(selectedRule.id, condition.id, { value: event.target.value })
+                            }
+                          >
+                            {KIND_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : condition.attribute === 'date-modified' ? (
+                          <input
+                            type="date"
+                            className="input"
+                            value={condition.value}
+                            onChange={(event) =>
+                              updateRuleCondition(selectedRule.id, condition.id, { value: event.target.value })
+                            }
+                          />
+                        ) : condition.attribute === 'size' ? (
+                          <div className="rule-size-input">
+                            <input
+                              type="number"
+                              min="0"
+                              className="input"
+                              value={condition.value}
+                              onChange={(event) =>
+                                updateRuleCondition(selectedRule.id, condition.id, { value: event.target.value })
+                              }
+                            />
+                            <select
+                              value={condition.unit || 'mb'}
+                              onChange={(event) =>
+                                updateRuleCondition(selectedRule.id, condition.id, { unit: event.target.value })
+                              }
+                            >
+                              {SIZE_UNITS.map((unit) => (
+                                <option key={unit.value} value={unit.value}>
+                                  {unit.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <input
+                            value={condition.value}
+                            placeholder="Value"
+                            className="input"
+                            onChange={(event) =>
+                              updateRuleCondition(selectedRule.id, condition.id, { value: event.target.value })
+                            }
+                          />
+                        )}
+                        <button className="ghost small" onClick={() => removeCondition(selectedRule.id, condition.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    )
+                  })}
+                  <button className="ghost" onClick={() => addCondition(selectedRule.id)}>
+                    Add condition
+                  </button>
+                </section>
+
+                <section className="section">
+                  <div className="section-header">
+                    <h2>Actions</h2>
+                    <p className="muted">Actions run in order. Nothing executes during preview.</p>
+                  </div>
+                  {selectedRule.actions.map((action) => (
+                    <div className="rule-row-editor" key={action.id}>
+                      <select
+                        value={action.type}
+                        onChange={(event) => {
+                          const nextType = event.target.value
+                          const updates: any = { type: nextType }
+                          if (nextType === 'rename' && !action.pattern) updates.pattern = '{name}'
+                          if (nextType === 'move' && !action.targetPath) updates.targetPath = ''
+                          updateRuleAction(selectedRule.id, action.id, updates)
+                        }}
+                      >
+                        <option value="move">Move to folder</option>
+                        <option value="rename">Rename</option>
+                        <option value="archive">Add to Archive</option>
+                      </select>
+                      {action.type === 'move' ? (
+                        <div className="rule-action-input">
+                          <input
+                            value={action.targetPath}
+                            placeholder="/path/to/folder"
+                            className="input"
+                            onChange={(event) =>
+                              updateRuleAction(selectedRule.id, action.id, { targetPath: event.target.value })
+                            }
+                          />
+                          <button className="ghost small" onClick={() => handlePickFolder(selectedRule.id, action.id)}>
+                            Choose…
+                          </button>
+                        </div>
+                      ) : null}
+                      {action.type === 'rename' ? (
+                        <input
+                          value={action.pattern}
+                          placeholder="Pattern (use {name} and {ext})"
+                          className="input"
+                          onChange={(event) =>
+                            updateRuleAction(selectedRule.id, action.id, { pattern: event.target.value })
+                          }
+                        />
+                      ) : null}
+                      {action.type === 'archive' ? <div className="muted">Moves to your Archives folder.</div> : null}
+                      <button className="ghost small" onClick={() => removeAction(selectedRule.id, action.id)}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button className="ghost" onClick={() => addAction(selectedRule.id)}>
+                    Add action
+                  </button>
+                </section>
+
+                <section className="section">
+                  <div className="section-header">
+                    <h2>Preview</h2>
+                    <p className="muted">Test this rule against the latest scan results.</p>
+                  </div>
+                  <button className="secondary" onClick={() => handlePreview(selectedRule)}>
+                    Preview rule
+                  </button>
+                  {rulePreview.error ? <p className="muted">{rulePreview.error}</p> : null}
+                  {rulePreview.ran && !rulePreview.matches.length && !rulePreview.error ? (
+                    <p className="muted">No files matched this rule.</p>
+                  ) : null}
+                  {rulePreview.matches.length ? (
+                    <div className="preview-list">
+                      {rulePreview.matches.map((match) => (
+                        <div className="preview-row" key={match.file.path}>
+                          <div className="mono">{match.file.relPath || match.file.name}</div>
+                          <div className="muted">{match.reasons.join(' · ')}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              </>
+            ) : (
+              <div className="muted">Select a rule to edit, or create a new one.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (view === 'archive') {
+    return renderShell(
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Archive</h2>
+          <p className="muted">Restore safely or open archived items in Finder.</p>
+        </div>
+
+        {archiveError ? <div className="error">{archiveError}</div> : null}
+        {archiveLoading ? <p className="muted">Loading archive…</p> : null}
+
+        {archiveItems.length ? (
+          <div className="archive-list">
+            {archiveItems.map((item) => (
+              <div className="archive-row" key={item.id}>
+                <div>
+                  <div className="archive-title">
+                    <span className="mono">{item.fileName || 'Unknown file'}</span>
+                    <span className={`status-tag ${item.status || 'archived'}`}>
+                      {item.status || 'archived'}
+                    </span>
+                  </div>
+                  <div className="archive-meta">
+                    <span className="muted">From:</span>
+                    <span className="mono">{shortenPath(item.fromPath)}</span>
+                  </div>
+                  <div className="archive-meta">
+                    <span className="muted">To:</span>
+                    <span className="mono">{shortenPath(item.toPath)}</span>
+                  </div>
+                  <div className="archive-meta">
+                    <span className="muted">When:</span>
+                    <span>{formatLocalTime(item.archivedAt)}</span>
+                  </div>
+                  <div className="archive-meta">
+                    <span className="muted">Rule:</span>
+                    <span className="mono">{item.ruleId || '—'}</span>
+                  </div>
+                </div>
+                <div className="archive-actions">
+                  <button className="ghost" onClick={() => api?.revealInFinder(item.toPath)}>
+                    Open in Finder
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={item.status !== 'archived'}
+                    onClick={() => handleRestoreArchive(item.id)}
+                  >
+                    Restore
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No archived items yet.</p>
+        )}
+      </div>
+    )
+  }
+
+  if (view === 'sandbox') {
+    const sandboxRoot = scanConfig?.sandboxRoot || '—'
+    const sandboxExists = Boolean(scanConfig?.sandboxExists)
+
+    return renderShell(
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Sandbox</h2>
+          <p className="muted">Generate realistic test files without touching real folders.</p>
+        </div>
+
+        {sandboxError ? <div className="error">{sandboxError}</div> : null}
+
+        <section className="section">
+          <div className="summary">
+            <div className="summary-row">
+              <span>Status</span>
+              <span>{sandboxExists ? 'Ready' : 'Not created'}</span>
+            </div>
+            <div className="summary-row">
+              <span>Location</span>
+              <span className="mono">{sandboxRoot}</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="button-row">
+            <button className="secondary" onClick={handleCreateSandbox} disabled={sandboxBusy}>
+              {sandboxBusy ? 'Working…' : 'Create sandbox test library'}
+            </button>
+            <button className="ghost" onClick={handleOpenSandbox} disabled={sandboxBusy}>
+              Open sandbox folder
+            </button>
+            <button className="ghost" onClick={handleResetSandbox} disabled={sandboxBusy}>
+              Reset / Delete sandbox
+            </button>
+          </div>
+          <p className="muted">
+            Sandbox files stay inside <span className="mono">{shortenPath(sandboxRoot)}</span>.
+          </p>
+        </section>
+      </div>
+    )
+  }
+
+  if (view === 'settings') {
+    const enabledLabels = scanSets.filter((set) => set.enabled).map((set) => set.label)
+    const scopeSummary = enabledLabels.length
+      ? `We’ll scan ${enabledLabels.join(', ')}.`
+      : 'No locations selected yet.'
+    const confirmReset = () =>
+      window.confirm?.('Reset settings to defaults? This will not delete data.') ?? false
+
+    return renderShell(
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Settings</h2>
+          <p className="muted">Manage scanning, exclusions, automation, and advanced options.</p>
+        </div>
+
+        <section className="section">
+          <div className="panel-header">
+            <h2>Scanning</h2>
+            <p className="muted">Choose which folders BundleBud scans.</p>
+          </div>
+          <div className="scan-scope-row">
+            <select value={scanScope} onChange={(event) => applyScope(event.target.value)}>
+              <option value="recommended">Recommended</option>
+              <option value="desktop">Desktop only</option>
+              <option value="all">All standard folders</option>
+              <option value="custom">Custom</option>
+            </select>
+            <button className="ghost" onClick={() => setShowScanDetails((prev) => !prev)}>
+              {showScanDetails ? 'Hide locations' : 'Edit locations'}
+            </button>
+          </div>
+          <div className="scan-summary">{scopeSummary}</div>
+          {scanScope === 'custom' ? (
+            <div className="scan-set-list">
+              {scanSets.map((set) => (
+                <div className="scan-set-row" key={set.id}>
+                  <div>
+                    <div className="scan-set-title">{set.label}</div>
+                    {showScanDetails ? (
+                      set.id === 'external' ? (
+                        <div className="muted">
+                          {(scanConfig?.externalVolumes || []).length
+                            ? (scanConfig?.externalVolumes || []).join(', ')
+                            : 'No external drives detected'}
+                        </div>
+                      ) : (
+                        <div className="muted">{set.path || '—'}</div>
+                      )
+                    ) : null}
+                  </div>
+                  <button
+                    className={`toggle ${set.enabled ? 'is-on' : 'is-off'}`}
+                    onClick={() => toggleScanSet(set.id)}
+                    disabled={loading}
+                  >
+                    <span className="toggle-label">{set.enabled ? 'On' : 'Off'}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="section">
+          <div className="panel-header">
+            <h2>Exclusions</h2>
+            <p className="muted">System paths and app data are ignored.</p>
+          </div>
+          <div className="summary">
+            <div className="summary-row">
+              <span>Excluded folders</span>
+              <span>System folders, hidden items, dev caches</span>
+            </div>
+            <div className="summary-row">
+              <span>App internal data</span>
+              <span>BundleBud data & reports</span>
+            </div>
+            {showScanDetails ? (
+              <>
+                <div className="summary-row">
+                  <span className="muted">Excluded names</span>
+                  <span className="mono">{(scanConfig?.excludeNames || []).join(', ') || '—'}</span>
+                </div>
+                <div className="summary-row">
+                  <span className="muted">Excluded paths</span>
+                  <span className="mono">{(scanConfig?.excludePaths || []).join(', ') || '—'}</span>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="panel-header">
+            <h2>Automation</h2>
+            <p className="muted">Decide how rules are applied.</p>
+          </div>
+          <div className="panel-row">
+            <span className="muted">Current</span>
+            <span className="mono">{automationMode === 'auto' ? 'Auto' : 'Review'}</span>
+          </div>
+          <div className="panel-row mode-row">
+            <button
+              className={`mode-button ${automationMode === 'auto' ? 'secondary' : 'ghost'}`}
+              onClick={() => handleSetAutomationMode('auto')}
+            >
+              Auto
+            </button>
+            <button
+              className={`mode-button ${automationMode === 'review' ? 'secondary' : 'ghost'}`}
+              onClick={() => handleSetAutomationMode('review')}
+            >
+              Review
+            </button>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="panel-header">
+            <h2>Advanced</h2>
+            <p className="muted">Fine-tune scanning and hashing limits.</p>
+          </div>
+          <div className="scan-options">
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={includeHidden}
+                onChange={(event) => setIncludeHidden(event.target.checked)}
+              />
+              Include hidden files
+            </label>
+          </div>
+          <label className="label">Max file size for hashing (MB)</label>
+          <input
+            type="number"
+            min="1"
+            max="2048"
+            value={maxSizeMB}
+            onChange={(event) => setMaxSizeMB(Number(event.target.value || DEFAULT_MAX_SIZE_MB))}
+            className="input"
+          />
+        </section>
+
+        <section className="section">
+          <button
+            className="ghost"
+            onClick={async () => {
+              if (!confirmReset()) return
+              await api?.saveSettings?.({
+                scanScope: 'recommended',
+                includeHidden: !(scanConfig?.excludeHiddenDefault ?? true),
+                maxSizeMB: DEFAULT_MAX_SIZE_MB,
+                scanSetEnabled: {}
+              })
+              await loadScanConfig()
+            }}
+          >
+            Reset to defaults
+          </button>
+        </section>
+      </div>
+    )
+  }
+
   if (view === 'dashboard') {
     const today = dashboardStats?.today || { actions: 0, movedFiles: 0, movedBytes: 0 }
     const last7Days = dashboardStats?.last7Days || { actions: 0, movedFiles: 0, movedBytes: 0 }
@@ -776,33 +1762,19 @@ export default function App() {
         <section className="panel-grid">
           <div className="panel">
             <div className="panel-header">
-              <h2>Automation mode</h2>
-              <p className="muted">Decide how rules are applied.</p>
+              <h2>Settings</h2>
+              <p className="muted">Scan scope, exclusions, and automation.</p>
             </div>
             <div className="panel-row">
-              <span className="muted">Current</span>
+              <span>Automation</span>
               <span className="mono">{automationMode === 'auto' ? 'Auto' : 'Review'}</span>
-            </div>
-            <div className="panel-row mode-row">
-              <button
-                className={`mode-button ${automationMode === 'auto' ? 'secondary' : 'ghost'}`}
-                onClick={() => handleSetAutomationMode('auto')}
-              >
-                Auto
-              </button>
-              <button
-                className={`mode-button ${automationMode === 'review' ? 'secondary' : 'ghost'}`}
-                onClick={() => handleSetAutomationMode('review')}
-              >
-                Review
-              </button>
             </div>
             <div className="panel-row">
               <span>Queued actions</span>
               <span>{reviewCount}</span>
             </div>
-            <button className="ghost" onClick={() => setView('review-queue')}>
-              Open Review Queue
+            <button className="ghost" onClick={() => setView('settings')}>
+              Open Settings
             </button>
           </div>
 
@@ -1079,6 +2051,12 @@ export default function App() {
     const scopeSummary = enabledLabels.length
       ? `We’ll scan ${enabledLabels.join(', ')}.`
       : 'No locations selected yet.'
+    const scopeLabel = {
+      recommended: 'Recommended',
+      desktop: 'Desktop only',
+      all: 'All standard folders',
+      custom: 'Custom'
+    }[scanScope] || 'Recommended'
 
     return renderShell(
       <div className="panel">
@@ -1089,104 +2067,27 @@ export default function App() {
         {error ? <div className="error">{error}</div> : null}
 
         <section className="section">
-          <div className="panel-header">
-            <h2>Scan scope</h2>
-            <p className="muted">Recommended scans your everyday folders with safe defaults.</p>
-          </div>
-          <div className="scan-scope-row">
-            <select
-              value={scanScope}
-              onChange={(event) => applyScope(event.target.value)}
-            >
-              <option value="recommended">Recommended</option>
-              <option value="desktop">Desktop only</option>
-              <option value="all">All standard folders</option>
-              <option value="custom">Custom</option>
-            </select>
-            <button className="ghost" onClick={() => setShowScanDetails((prev) => !prev)}>
-              {showScanDetails ? 'Hide details' : 'Edit locations'}
-            </button>
-          </div>
-          <div className="scan-summary">{scopeSummary}</div>
-          {scanScope === 'custom' ? (
-            <div className="scan-set-list">
-              {scanSets.map((set) => (
-                <div className="scan-set-row" key={set.id}>
-                  <div>
-                    <div className="scan-set-title">{set.label}</div>
-                    {showScanDetails ? (
-                      set.id === 'external' ? (
-                        <div className="muted">
-                          {(scanConfig?.externalVolumes || []).length
-                            ? (scanConfig?.externalVolumes || []).join(', ')
-                            : 'No external drives detected'}
-                        </div>
-                      ) : (
-                        <div className="muted">{set.path || '—'}</div>
-                      )
-                    ) : null}
-                  </div>
-                  <button
-                    className={`toggle ${set.enabled ? 'is-on' : 'is-off'}`}
-                    onClick={() => toggleScanSet(set.id)}
-                    disabled={loading}
-                  >
-                    <span className="toggle-label">{set.enabled ? 'On' : 'Off'}</span>
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </section>
-
-        <section className="section">
-          <div className="scan-options">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={includeHidden}
-                onChange={(event) => setIncludeHidden(event.target.checked)}
-              />
-              Include hidden files
-            </label>
-          </div>
-        </section>
-
-        <section className="section">
           <div className="summary">
             <div className="summary-row">
-              <span>Excluded folders</span>
-              <span>System folders, hidden items, dev caches</span>
+              <span>Scan scope</span>
+              <span>{scopeLabel}</span>
             </div>
             <div className="summary-row">
-              <span>App internal data</span>
-              <span>BundleBud data & reports</span>
+              <span>Locations</span>
+              <span>{enabledLabels.join(', ') || '—'}</span>
             </div>
-            {showScanDetails ? (
-              <>
-                <div className="summary-row">
-                  <span className="muted">Excluded names</span>
-                  <span className="mono">{(scanConfig?.excludeNames || []).join(', ') || '—'}</span>
-                </div>
-                <div className="summary-row">
-                  <span className="muted">Excluded paths</span>
-                  <span className="mono">{(scanConfig?.excludePaths || []).join(', ') || '—'}</span>
-                </div>
-              </>
-            ) : null}
+            <div className="summary-row">
+              <span>Include hidden</span>
+              <span>{includeHidden ? 'Yes' : 'No'}</span>
+            </div>
+            <div className="summary-row">
+              <span>Max hash size</span>
+              <span>{maxSizeMB} MB</span>
+            </div>
           </div>
-        </section>
-
-        <section className="section">
-          <label className="label">Max file size for hashing (MB)</label>
-          <input
-            type="number"
-            min="1"
-            max="2048"
-            value={maxSizeMB}
-            onChange={(event) => setMaxSizeMB(Number(event.target.value || DEFAULT_MAX_SIZE_MB))}
-            className="input"
-          />
+          <button className="ghost" onClick={() => setView('settings')}>
+            Open Settings
+          </button>
         </section>
 
         <section className="section">

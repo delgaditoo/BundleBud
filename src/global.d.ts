@@ -19,6 +19,12 @@ declare global {
       getAutomationMode: () => Promise<{ mode: 'auto' | 'review' }>
       setAutomationMode: (mode: 'auto' | 'review') => Promise<{ mode: 'auto' | 'review' }>
       listReviewQueue: () => Promise<any[]>
+      listRules: () => Promise<any[]>
+      saveRules: (rules: any[]) => Promise<any[]>
+      getSettings: () => Promise<any>
+      saveSettings: (settings: any) => Promise<any>
+      listArchiveItems: () => Promise<any[]>
+      restoreArchiveItem: (itemId: string) => Promise<any>
       applyProposedAction: (actionId: string) => Promise<any>
       rejectProposedAction: (actionId: string) => Promise<any>
       startDesktopWatcher: () => Promise<{ running: boolean }>
@@ -29,6 +35,9 @@ declare global {
       getDownloadsWatcherStatus: () => Promise<{ running: boolean }>
       getSystemInfo: () => Promise<any>
       getScanConfig: () => Promise<any>
+      createSandbox: () => Promise<{ ok: boolean; root?: string; error?: string | null }>
+      resetSandbox: () => Promise<{ ok: boolean; root?: string; error?: string | null }>
+      openSandboxFolder: () => Promise<{ ok: boolean; root?: string; error?: string | null }>
     }
   }
 }

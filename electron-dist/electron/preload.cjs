@@ -18,6 +18,12 @@ electron_1.contextBridge.exposeInMainWorld('api', {
     getAutomationMode: () => electron_1.ipcRenderer.invoke('automation:getMode'),
     setAutomationMode: (mode) => electron_1.ipcRenderer.invoke('automation:setMode', mode),
     listReviewQueue: () => electron_1.ipcRenderer.invoke('automation:listQueue'),
+    listRules: () => electron_1.ipcRenderer.invoke('automation:listRules'),
+    saveRules: (rules) => electron_1.ipcRenderer.invoke('automation:saveRules', rules),
+    getSettings: () => electron_1.ipcRenderer.invoke('automation:getSettings'),
+    saveSettings: (settings) => electron_1.ipcRenderer.invoke('automation:saveSettings', settings),
+    listArchiveItems: () => electron_1.ipcRenderer.invoke('archive:list'),
+    restoreArchiveItem: (itemId) => electron_1.ipcRenderer.invoke('archive:restore', itemId),
     applyProposedAction: (actionId) => electron_1.ipcRenderer.invoke('automation:apply', actionId),
     rejectProposedAction: (actionId) => electron_1.ipcRenderer.invoke('automation:reject', actionId),
     startDesktopWatcher: () => electron_1.ipcRenderer.invoke('desktop-watcher:start'),
@@ -27,5 +33,8 @@ electron_1.contextBridge.exposeInMainWorld('api', {
     stopDownloadsWatcher: () => electron_1.ipcRenderer.invoke('downloads-watcher:stop'),
     getDownloadsWatcherStatus: () => electron_1.ipcRenderer.invoke('downloads-watcher:status'),
     getSystemInfo: () => electron_1.ipcRenderer.invoke('system:getInfo'),
-    getScanConfig: () => electron_1.ipcRenderer.invoke('scan:getConfig')
+    getScanConfig: () => electron_1.ipcRenderer.invoke('scan:getConfig'),
+    createSandbox: () => electron_1.ipcRenderer.invoke('sandbox:create'),
+    resetSandbox: () => electron_1.ipcRenderer.invoke('sandbox:reset'),
+    openSandboxFolder: () => electron_1.ipcRenderer.invoke('sandbox:open')
 });
