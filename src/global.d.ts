@@ -13,6 +13,7 @@ declare global {
       getActivity: (limit?: number) => Promise<any[]>
       clearActivity: () => Promise<boolean>
       addTestActivity: () => Promise<any>
+      restoreToHistory: (operationId: string) => Promise<any>
       canUndo: () => Promise<{ canUndo: boolean; lastTitle?: string }>
       undoLastMove: () => Promise<{ ok: boolean; error?: string | null }>
       getDashboardStats: () => Promise<any>

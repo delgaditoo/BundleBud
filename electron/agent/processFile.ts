@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import { appendEntry } from './ledger.js'
 import { appendArchiveItem, isArchivePath } from './archiveStore.js'
 import { appendCreatedFolder } from './createdFoldersStore.js'
+import { appendOperation } from './historyStore.js'
 import { applyRules } from '../rules/index.js'
 import { getAutomationMode, enqueueProposedAction } from './automationStore.js'
 
@@ -40,6 +41,11 @@ type ProposedAction = {
   reason: string
   sizeBytes: number
   status: 'queued' | 'applied' | 'rejected' | 'error'
+  groupId?: string
+  groupTitle?: string
+  targetFolderPath?: string
+  createFolderEntry?: boolean
+  folderEntryId?: string
 }
 
 type StabilityConfig = { timeoutMs: number; intervalMs: number }
@@ -175,6 +181,23 @@ export async function executeMoveAction(proposedAction: ProposedAction) {
   }
 
   await appendEntry(actionEntry)
+  if (status === 'success') {
+    await appendOperation({
+      id: randomUUID(),
+      ts: Date.now(),
+      type: isArchivePath(finalDestination) ? 'archive' : 'move',
+      beforePath: proposedAction.fromPath,
+      afterPath: finalDestination,
+      meta: {
+        ruleId: proposedAction.ruleId,
+        source: proposedAction.source,
+        reason: proposedAction.reason,
+        sizeBytes: proposedAction.sizeBytes,
+        groupId: proposedAction.groupId || null,
+        groupTitle: proposedAction.groupTitle || null
+      }
+    })
+  }
 
   if (status === 'success' && isArchivePath(finalDestination)) {
     try {
@@ -201,6 +224,17 @@ export async function executeMoveAction(proposedAction: ProposedAction) {
         createdAt: Date.now(),
         sourceGroupId: proposedAction.groupId || null,
         sourceGroupTitle: proposedAction.groupTitle || null
+      })
+      await appendOperation({
+        id: randomUUID(),
+        ts: Date.now(),
+        type: 'create-folder',
+        beforePath: null,
+        afterPath: proposedAction.targetFolderPath,
+        meta: {
+          groupId: proposedAction.groupId,
+          groupTitle: proposedAction.groupTitle
+        }
       })
     } catch {
       // Ignore created folder index errors.

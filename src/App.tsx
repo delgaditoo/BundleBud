@@ -63,6 +63,15 @@ const SIZE_UNITS = [
   { value: 'mb', label: 'MB' },
   { value: 'gb', label: 'GB' }
 ]
+const OPERATION_LABELS = {
+  move: 'Move',
+  archive: 'Archive',
+  rename: 'Rename',
+  'create-folder': 'Create folder',
+  restore: 'Restore',
+  trash: 'Trash',
+  test: 'Test'
+}
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B'
@@ -88,6 +97,20 @@ function shortenPath(value, maxLength = 64) {
   return `${head}…${tail}`
 }
 
+function formatOperationLabel(type) {
+  if (!type) return 'Action'
+  return OPERATION_LABELS[type] || String(type)
+}
+
+function formatOperationSummary(entry) {
+  const from = entry?.beforePath || entry?.from || ''
+  const to = entry?.afterPath || entry?.to || ''
+  if (from && to) return `${shortenPath(from)} → ${shortenPath(to)}`
+  if (to) return shortenPath(to)
+  if (from) return shortenPath(from)
+  return entry?.title || '—'
+}
+
 function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">
@@ -111,6 +134,8 @@ export default function App() {
   const [activityEntries, setActivityEntries] = useState([])
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState('')
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  const [restoreNotice, setRestoreNotice] = useState('')
   const [undoState, setUndoState] = useState({ canUndo: false, lastTitle: '' })
   const [undoBusy, setUndoBusy] = useState(false)
   const [watcherStatus, setWatcherStatus] = useState({ running: false })
@@ -154,7 +179,7 @@ export default function App() {
 
   useEffect(() => {
     if (view === 'activity') {
-      loadActivity(50)
+      loadActivity()
       loadUndoState()
       loadWatcherStatus()
       loadDownloadsWatcherStatus()
@@ -219,7 +244,7 @@ export default function App() {
     }
   }
 
-  async function loadActivity(limit = 50) {
+  async function loadActivity(limit) {
     setActivityError('')
     setActivityLoading(true)
     try {
@@ -228,6 +253,7 @@ export default function App() {
       }
       const entries = await api.getActivity(limit)
       setActivityEntries(Array.isArray(entries) ? entries : [])
+      setRestoreNotice('')
     } catch (err) {
       setActivityError(err?.message || 'Failed to load activity.')
     } finally {
@@ -425,7 +451,7 @@ export default function App() {
       }
       await api.restoreArchiveItem(itemId)
       await loadArchive()
-      await loadActivity(50)
+      await loadActivity()
     } catch (err) {
       setArchiveError(err?.message || 'Failed to restore item.')
     }
@@ -440,7 +466,7 @@ export default function App() {
       }
       await api.createSandbox()
       await loadScanConfig()
-      await loadActivity(50)
+      await loadActivity()
     } catch (err) {
       setSandboxError(err?.message || 'Failed to create sandbox.')
     } finally {
@@ -457,7 +483,7 @@ export default function App() {
       }
       await api.resetSandbox()
       await loadScanConfig()
-      await loadActivity(50)
+      await loadActivity()
     } catch (err) {
       setSandboxError(err?.message || 'Failed to reset sandbox.')
     } finally {
@@ -816,7 +842,7 @@ export default function App() {
         throw new Error('Undo bridge unavailable.')
       }
       await api.undoLastMove()
-      await loadActivity(50)
+      await loadActivity()
       await loadUndoState()
       await loadDashboard()
     } catch (err) {
@@ -909,7 +935,7 @@ export default function App() {
     setActivityLoading(true)
     try {
       await api?.addTestActivity?.()
-      await loadActivity(50)
+      await loadActivity()
     } catch (err) {
       setActivityError(err?.message || 'Failed to add test activity.')
     } finally {
@@ -922,11 +948,48 @@ export default function App() {
     setActivityLoading(true)
     try {
       await api?.clearActivity?.()
-      await loadActivity(50)
+      await loadActivity()
     } catch (err) {
       setActivityError(err?.message || 'Failed to clear activity.')
     } finally {
       setActivityLoading(false)
+    }
+  }
+
+  function getRestoreCount(operationId) {
+    const index = activityEntries.findIndex((entry) => entry.id === operationId)
+    if (index === -1) return 0
+    return Math.max(0, activityEntries.length - index - 1)
+  }
+
+  async function handleRestoreTo(operationId) {
+    setActivityError('')
+    setRestoreNotice('')
+    if (!api?.restoreToHistory) {
+      setActivityError('Restore bridge unavailable.')
+      return
+    }
+    const undoCount = getRestoreCount(operationId)
+    if (!undoCount) {
+      setRestoreNotice('Nothing to undo after this step.')
+      return
+    }
+    const confirmed = window.confirm(`This will undo ${undoCount} actions. Continue?`)
+    if (!confirmed) return
+
+    setRestoreBusy(true)
+    try {
+      const result = await api.restoreToHistory(operationId)
+      if (!result?.ok) {
+        throw new Error(result?.error || 'Restore failed.')
+      }
+      await loadActivity()
+      await loadDashboard()
+      setRestoreNotice(`Restored ${result.summary?.undone ?? 0} of ${undoCount} actions.`)
+    } catch (err) {
+      setActivityError(err?.message || 'Failed to restore history.')
+    } finally {
+      setRestoreBusy(false)
     }
   }
 
@@ -2052,16 +2115,14 @@ export default function App() {
               {recentActions.map((entry) => (
                 <div className="panel-row panel-row-stacked" key={`${entry.ts}-${entry.from || ''}`}>
                   <div className="row-top">
-                    <span className={`badge badge-${entry.status || 'info'}`}>
-                      {entry.status || 'info'}
+                    <span className="badge badge-info">
+                      {formatOperationLabel(entry.type || entry.title)}
                     </span>
                     <span className="mono">{entry.ruleId || '—'}</span>
                     <span className="muted">{formatLocalTime(entry.ts)}</span>
                   </div>
                   <div className="row-bottom mono">
-                    {entry.from
-                      ? `${shortenPath(entry.from)} → ${shortenPath(entry.to)}`
-                      : entry.title}
+                    {formatOperationSummary(entry)}
                   </div>
                 </div>
               ))}
@@ -2110,6 +2171,17 @@ export default function App() {
           <p className="muted">Toggle background monitoring and review logs.</p>
         </div>
         {activityError ? <div className="error">{activityError}</div> : null}
+        {restoreNotice ? (
+          <div className="callout">
+            <div className="callout-icon">
+              <PiRobot size={18} />
+            </div>
+            <div>
+              <div className="callout-title">Restore complete</div>
+              <div className="callout-sub">{restoreNotice}</div>
+            </div>
+          </div>
+        ) : null}
 
         <section className="section watcher-panel">
           <div>
@@ -2158,7 +2230,7 @@ export default function App() {
             <button className="secondary" onClick={handleClearActivity} disabled={activityLoading}>
               Clear log
             </button>
-            <button className="secondary" onClick={() => loadActivity(50)} disabled={activityLoading}>
+            <button className="secondary" onClick={() => loadActivity()} disabled={activityLoading}>
               Refresh
             </button>
           </div>
@@ -2173,25 +2245,40 @@ export default function App() {
             ? activityEntries
                 .slice()
                 .reverse()
-                .map((entry) => (
-                  <div className="activity-entry" key={entry.id}>
-                    <div>
-                      <div className="activity-title">
-                        <span className={`badge badge-${entry.status || 'info'}`}>
-                          {entry.status || 'info'}
-                        </span>
-                        <span>{entry.title}</span>
+                .map((entry) => {
+                  const restoreCount = getRestoreCount(entry.id)
+                  return (
+                    <div className="activity-entry" key={entry.id}>
+                      <div>
+                        <div className="activity-title">
+                          <span className="badge badge-info">
+                            {formatOperationLabel(entry.type || entry.title)}
+                          </span>
+                          <span>{formatOperationLabel(entry.type || entry.title)}</span>
+                        </div>
+                        {entry.beforePath || entry.afterPath ? (
+                          <div className="mono muted">
+                            {formatOperationSummary(entry)}
+                          </div>
+                        ) : null}
+                        <div className="muted">
+                          {entry?.meta?.ruleId ? `Rule ${entry.meta.ruleId}` : 'Manual'}
+                          {entry?.meta?.reason ? ` · ${entry.meta.reason}` : ''}
+                        </div>
                       </div>
-                      {entry.path ? <div className="mono muted">{entry.path}</div> : null}
-                      {entry.meta ? (
-                        <div className="muted">{entry.kind} · {JSON.stringify(entry.meta)}</div>
-                      ) : (
-                        <div className="muted">{entry.kind}</div>
-                      )}
+                      <div className="activity-meta">
+                        <div className="muted activity-date">{formatLocalTime(entry.ts)}</div>
+                        <button
+                          className="secondary"
+                          onClick={() => handleRestoreTo(entry.id)}
+                          disabled={restoreBusy || restoreCount === 0}
+                        >
+                          {restoreCount ? `Restore to here (${restoreCount})` : 'Current'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="muted activity-date">{formatLocalTime(entry.ts)}</div>
-                  </div>
-                ))
+                  )
+                })
             : null}
         </section>
       </div>

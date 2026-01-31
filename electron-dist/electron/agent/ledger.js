@@ -1,6 +1,8 @@
-import { app } from 'electron';
+import * as electron from 'electron';
 import fs from 'fs/promises';
 import path from 'path';
+const electronModule = electron.default ?? electron;
+const { app } = electronModule;
 const LEDGER_FILENAME = 'activity.jsonl';
 function getLedgerPath() {
     return path.join(app.getPath('userData'), LEDGER_FILENAME);

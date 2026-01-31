@@ -1,4 +1,7 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import * as electron from 'electron'
+
+const electronModule = (electron as any).default ?? electron
+const { contextBridge, ipcRenderer } = electronModule
 
 contextBridge.exposeInMainWorld('api', {
   selectFolder: () => ipcRenderer.invoke('select-folder'),
@@ -11,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   getActivity: (limit?: number) => ipcRenderer.invoke('activity:getRecent', limit),
   clearActivity: () => ipcRenderer.invoke('activity:clear'),
   addTestActivity: () => ipcRenderer.invoke('activity:addTestEntry'),
+  restoreToHistory: (operationId: string) => ipcRenderer.invoke('activity:restoreTo', operationId),
   canUndo: () => ipcRenderer.invoke('activity:canUndo'),
   undoLastMove: () => ipcRenderer.invoke('activity:undoLastMove'),
   getDashboardStats: () => ipcRenderer.invoke('dashboard:getStats'),

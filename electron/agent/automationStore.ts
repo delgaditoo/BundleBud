@@ -1,7 +1,9 @@
 import fs from 'fs/promises'
 import path from 'path'
-import { app } from 'electron'
+import * as electron from 'electron'
 
+const electronModule = (electron as any).default ?? electron
+const { app } = electronModule
 const STORE_FILENAME = 'automation.json'
 const DEFAULT_STORE = {
   automationMode: 'review' as 'auto' | 'review',

@@ -1,11 +1,10 @@
 /**
- * @typedef {Object} ActivityEntry
+ * @typedef {Object} HistoryOperation
  * @property {string} id
  * @property {number} ts
- * @property {"event"|"action"} kind
- * @property {string} title
- * @property {string} [path]
- * @property {"info"|"success"|"warning"|"error"} status
+ * @property {"move"|"rename"|"create-folder"|"archive"|"restore"|"trash"|"test"} type
+ * @property {string|null} beforePath
+ * @property {string|null} afterPath
  * @property {Object} [meta]
  */
 export {};

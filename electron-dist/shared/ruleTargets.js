@@ -1,5 +1,7 @@
 import path from 'path';
-import { app } from 'electron';
+import * as electron from 'electron';
+const electronModule = electron.default ?? electron;
+const { app } = electronModule;
 export function getRuleTargets() {
     return {
         screenshots: path.join(app.getPath('pictures'), 'Screenshots'),

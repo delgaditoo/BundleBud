@@ -1,8 +1,10 @@
-import { app } from 'electron'
+import * as electron from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
 import { getRuleTargets } from '../../shared/ruleTargets.js'
 
+const electronModule = (electron as any).default ?? electron
+const { app } = electronModule
 const ARCHIVE_FILENAME = 'archive-index.json'
 const DEFAULT_STORE = { items: [] as any[] }
 

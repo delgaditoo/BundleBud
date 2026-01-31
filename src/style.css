@@ -1015,6 +1015,14 @@ select {
   min-height: 120px;
 }
 
+.activity-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  justify-self: end;
+}
+
 .activity-date {
   text-align: right;
   justify-self: end;
@@ -1206,6 +1214,10 @@ select {
   .review-row,
   .activity-entry {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .activity-meta {
     align-items: flex-start;
   }
 

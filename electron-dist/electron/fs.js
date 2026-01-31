@@ -2,9 +2,12 @@ import fs from 'fs/promises';
 import { createReadStream } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { app, shell } from 'electron';
+import * as electron from 'electron';
 import { randomUUID } from 'crypto';
 import { appendArchiveItem } from './agent/archiveStore.js';
+import { appendOperation } from './agent/historyStore.js';
+const electronModule = electron.default ?? electron;
+const { app, shell } = electronModule;
 const DEFAULT_EXCLUDES = new Set([
     'node_modules',
     '.git',
@@ -187,6 +190,18 @@ export async function executePlan(plan = {}) {
                 try {
                     await shell.trashItem(item.path);
                     results.push({ file: item.file, action: 'move-to-trash', success: true });
+                    await appendOperation({
+                        id: randomUUID(),
+                        ts: Date.now(),
+                        type: 'trash',
+                        beforePath: item.path,
+                        afterPath: null,
+                        meta: {
+                            ruleId: item.ruleId || null,
+                            reason: item.reason || null,
+                            sizeBytes: item.sizeBytes || item.size || null
+                        }
+                    });
                     continue;
                 }
                 catch (error) {
@@ -214,6 +229,19 @@ export async function executePlan(plan = {}) {
                     catch {
                         // Ignore archive index errors.
                     }
+                    await appendOperation({
+                        id: randomUUID(),
+                        ts: Date.now(),
+                        type: 'archive',
+                        beforePath: item.path,
+                        afterPath: fallbackPath,
+                        meta: {
+                            ruleId: item.ruleId || null,
+                            reason: item.reason || null,
+                            sizeBytes: item.sizeBytes || item.size || null,
+                            fallback: 'trash_failed'
+                        }
+                    });
                     continue;
                 }
             }
@@ -239,6 +267,18 @@ export async function executePlan(plan = {}) {
                 catch {
                     // Ignore archive index errors.
                 }
+                await appendOperation({
+                    id: randomUUID(),
+                    ts: Date.now(),
+                    type: 'archive',
+                    beforePath: item.path,
+                    afterPath: destination,
+                    meta: {
+                        ruleId: item.ruleId || null,
+                        reason: item.reason || null,
+                        sizeBytes: item.sizeBytes || item.size || null
+                    }
+                });
             }
         }
         catch (error) {
@@ -269,6 +309,7 @@ export async function executePlan(plan = {}) {
     await fs.mkdir(reportDir, { recursive: true });
     const reportPath = path.join(reportDir, `run-${runId}.json`);
     await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
+    const archiveRoot = report.archiveRoot;
     return {
         reportPath,
         archiveRoot,

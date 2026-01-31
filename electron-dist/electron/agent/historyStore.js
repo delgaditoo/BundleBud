@@ -1,17 +1,17 @@
-import * as electron from 'electron';
 import fs from 'fs/promises';
 import path from 'path';
+import * as electron from 'electron';
 const electronModule = electron.default ?? electron;
 const { app } = electronModule;
-const STORE_FILENAME = 'created-folders.json';
-const DEFAULT_STORE = { items: [] };
+const STORE_FILENAME = 'history.json';
+const DEFAULT_STORE = { operations: [] };
 function getStorePath() {
     return path.join(app.getPath('userData'), STORE_FILENAME);
 }
 function normalizeStore(data) {
     const store = { ...DEFAULT_STORE, ...data };
-    if (!Array.isArray(store.items))
-        store.items = [];
+    if (!Array.isArray(store.operations))
+        store.operations = [];
     return store;
 }
 async function readStore() {
@@ -33,22 +33,21 @@ async function writeStore(store) {
     await fs.mkdir(path.dirname(storePath), { recursive: true });
     await fs.writeFile(storePath, JSON.stringify(store, null, 2), 'utf8');
 }
-export async function listCreatedFolders() {
+export async function appendOperation(operation) {
     const store = await readStore();
-    return store.items;
-}
-export async function appendCreatedFolder(item) {
-    const store = await readStore();
-    store.items.unshift(item);
+    store.operations.push(operation);
     await writeStore(store);
-    return item;
+    return operation;
 }
-export async function updateCreatedFolder(itemId, updates) {
+export async function listOperations(limit) {
     const store = await readStore();
-    const index = store.items.findIndex((item) => item.id === itemId);
-    if (index === -1)
-        return null;
-    store.items[index] = { ...store.items[index], ...updates };
+    if (!Number.isFinite(limit))
+        return store.operations;
+    return store.operations.slice(-Math.max(0, limit));
+}
+export async function clearOperations() {
+    const store = await readStore();
+    store.operations = [];
     await writeStore(store);
-    return store.items[index];
+    return true;
 }

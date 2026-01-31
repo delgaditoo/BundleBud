@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import * as electron from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
@@ -6,7 +6,8 @@ import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { scanFiles, analyzeDuplicates, executePlan } from './fs.js';
-import { appendEntry, clearAll, readRecent } from './agent/ledger.js';
+import { appendEntry, clearAll } from './agent/ledger.js';
+import { appendOperation, listOperations, clearOperations } from './agent/historyStore.js';
 import { randomUUID } from 'crypto';
 import chokidar from 'chokidar';
 import { processFile, executeMoveAction } from './agent/processFile.js';
@@ -14,6 +15,8 @@ import { getDashboardStats } from './agent/stats.js';
 import { listArchiveItems, updateArchiveItem } from './agent/archiveStore.js';
 import { listCreatedFolders, updateCreatedFolder } from './agent/createdFoldersStore.js';
 import { getAutomationMode, setAutomationMode, listReviewQueue, updateProposedAction, enqueueProposedActions, listRules, saveRules, getSettings, saveSettings } from './agent/automationStore.js';
+const electronModule = electron.default ?? electron;
+const { app, BrowserWindow, ipcMain, dialog, shell } = electronModule;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 let mainWindow;
@@ -112,19 +115,48 @@ async function ensureUniqueFolderPath(targetPath) {
         }
     }
 }
-async function moveFileSafe(source, destination) {
-    await fs.mkdir(path.dirname(destination), { recursive: true });
-    try {
-        await fs.rename(source, destination);
+async function reverseOperation(operation) {
+    const type = operation?.type;
+    if (type === 'create-folder') {
+        const target = operation?.afterPath;
+        if (!target)
+            return { ok: false, reason: 'missing-path' };
+        try {
+            const entries = await fs.readdir(target);
+            if (entries.length)
+                return { ok: false, reason: 'not-empty' };
+            await fs.rmdir(target);
+            return { ok: true, action: 'delete-folder', path: target };
+        }
+        catch (err) {
+            return { ok: false, reason: err?.message || 'delete-failed' };
+        }
     }
-    catch (error) {
-        if (error.code === 'EXDEV') {
-            await fs.copyFile(source, destination);
-            await fs.unlink(source);
-        }
-        else {
-            throw error;
-        }
+    if (type === 'trash') {
+        return { ok: false, reason: 'trash-not-reversible' };
+    }
+    const fromPath = operation?.afterPath;
+    const toPath = operation?.beforePath;
+    if (!fromPath || !toPath)
+        return { ok: false, reason: 'missing-path' };
+    try {
+        const finalDestination = await ensureUniqueDestination(toPath);
+        await moveFileSafe(fromPath, finalDestination);
+        await appendOperation({
+            id: randomUUID(),
+            ts: Date.now(),
+            type: 'restore',
+            beforePath: fromPath,
+            afterPath: finalDestination,
+            meta: {
+                restoredFrom: operation?.id || null,
+                originalType: type || null
+            }
+        });
+        return { ok: true, action: 'move', from: fromPath, to: finalDestination };
+    }
+    catch (err) {
+        return { ok: false, reason: err?.message || 'move-failed' };
     }
 }
 async function listExternalVolumes() {
@@ -241,13 +273,31 @@ async function stopDesktopWatcher() {
     desktopWatcher = null;
     return { running: false };
 }
+function formatOperationTitle(operation) {
+    const type = operation?.type;
+    if (type === 'move')
+        return 'Moved file';
+    if (type === 'archive')
+        return 'Archived file';
+    if (type === 'rename')
+        return 'Renamed item';
+    if (type === 'create-folder')
+        return 'Created folder';
+    if (type === 'restore')
+        return 'Restored file';
+    if (type === 'trash')
+        return 'Trashed file';
+    if (type === 'test')
+        return 'Test entry';
+    return 'Operation';
+}
 async function getLastMoveAction(limit = 300) {
-    const entries = await readRecent(limit);
+    const entries = await listOperations(limit);
     for (let i = entries.length - 1; i >= 0; i -= 1) {
         const entry = entries[i];
-        if (entry?.kind !== 'action')
+        if (!entry)
             continue;
-        if (entry?.meta?.from && entry?.meta?.to) {
+        if (entry?.type === 'move' || entry?.type === 'archive' || entry?.type === 'rename') {
             return entry;
         }
     }
@@ -354,9 +404,10 @@ ipcMain.handle('open-report-folder', async (_event, reportPath) => {
     return shell.openPath(dir);
 });
 ipcMain.handle('activity:getRecent', async (_event, limit = 50) => {
-    return readRecent(limit);
+    return listOperations(limit);
 });
 ipcMain.handle('activity:clear', async () => {
+    await clearOperations();
     await clearAll();
     return true;
 });
@@ -364,14 +415,38 @@ ipcMain.handle('activity:addTestEntry', async () => {
     const entry = {
         id: randomUUID(),
         ts: Date.now(),
-        kind: 'event',
-        title: 'Test activity event',
-        path: '/tmp/example.txt',
-        status: 'info',
+        type: 'test',
+        beforePath: '/tmp/example.txt',
+        afterPath: '/tmp/example.txt',
         meta: { source: 'manual' }
     };
-    await appendEntry(entry);
+    await appendOperation(entry);
     return entry;
+});
+ipcMain.handle('activity:restoreTo', async (_event, operationId) => {
+    if (!operationId)
+        return { ok: false, error: 'Missing operation id.' };
+    const operations = await listOperations();
+    const index = operations.findIndex((entry) => entry?.id === operationId);
+    if (index === -1)
+        return { ok: false, error: 'Operation not found.' };
+    const toUndo = operations.slice(index + 1);
+    const results = [];
+    for (const entry of toUndo.slice().reverse()) {
+        const result = await reverseOperation(entry);
+        results.push({
+            id: entry?.id,
+            type: entry?.type,
+            ok: result.ok,
+            reason: result.ok ? null : result.reason || 'failed'
+        });
+    }
+    const summary = {
+        total: toUndo.length,
+        undone: results.filter((item) => item.ok).length,
+        skipped: results.filter((item) => !item.ok).length
+    };
+    return { ok: true, summary, results };
 });
 ipcMain.handle('desktop-watcher:start', async () => {
     return startDesktopWatcher();
@@ -460,50 +535,29 @@ ipcMain.handle('activity:canUndo', async () => {
     const lastMove = await getLastMoveAction();
     if (!lastMove)
         return { canUndo: false };
-    return { canUndo: true, lastTitle: lastMove.title };
+    return { canUndo: true, lastTitle: formatOperationTitle(lastMove) };
 });
 ipcMain.handle('activity:undoLastMove', async () => {
     const lastMove = await getLastMoveAction();
     if (!lastMove)
         return { ok: false, error: 'No move action found.' };
-    const fromPath = lastMove.meta?.from;
-    const toPath = lastMove.meta?.to;
-    const ruleId = lastMove.meta?.ruleId;
-    const source = lastMove.meta?.source;
-    if (!fromPath || !toPath) {
-        return { ok: false, error: 'Move metadata missing.' };
-    }
-    let finalDestination = fromPath;
-    let status = 'success';
-    let errorMessage = '';
-    try {
-        await fs.mkdir(path.dirname(fromPath), { recursive: true });
-        finalDestination = await ensureUniqueDestination(fromPath);
-        await fs.rename(toPath, finalDestination);
-    }
-    catch (err) {
-        status = 'error';
-        errorMessage = err?.message || String(err);
-    }
-    const undoEntry = {
+    const result = await reverseOperation(lastMove);
+    const status = result.ok ? 'success' : 'error';
+    await appendEntry({
         id: randomUUID(),
         ts: Date.now(),
         kind: 'action',
         title: 'Undo performed',
-        path: fromPath,
+        path: lastMove?.beforePath || lastMove?.afterPath || '',
         status,
         meta: {
-            from: toPath,
-            to: finalDestination,
-            ruleId,
-            source
+            from: lastMove?.afterPath || null,
+            to: lastMove?.beforePath || null,
+            action: 'undo',
+            error: result.ok ? null : result.reason || 'Undo failed'
         }
-    };
-    if (status === 'error') {
-        undoEntry.meta.error = errorMessage;
-    }
-    await appendEntry(undoEntry);
-    return { ok: status === 'success', error: errorMessage || null };
+    });
+    return { ok: result.ok, error: result.ok ? null : result.reason || 'Undo failed' };
 });
 ipcMain.handle('dashboard:getStats', async () => {
     const stats = await getDashboardStats();
@@ -592,6 +646,19 @@ ipcMain.handle('folders:rename', async (_event, itemId, nextName) => {
             error: errorMessage || null
         }
     });
+    if (status === 'success') {
+        await appendOperation({
+            id: randomUUID(),
+            ts: Date.now(),
+            type: 'rename',
+            beforePath: item.path,
+            afterPath: target,
+            meta: {
+                source: 'created-folders',
+                displayName: nextName
+            }
+        });
+    }
     return { ok: status === 'success', action: updated, error: errorMessage || null };
 });
 ipcMain.handle('files:open', async (_event, targetPath) => {
@@ -650,6 +717,19 @@ ipcMain.handle('archive:restore', async (_event, itemId) => {
             error: errorMessage || null
         }
     });
+    if (status === 'success') {
+        await appendOperation({
+            id: randomUUID(),
+            ts: Date.now(),
+            type: 'restore',
+            beforePath: item.toPath,
+            afterPath: finalDestination,
+            meta: {
+                ruleId: item.ruleId || null,
+                source: 'archive'
+            }
+        });
+    }
     return { ok: status === 'success', action: updated, error: errorMessage || null };
 });
 ipcMain.handle('sandbox:create', async () => {
