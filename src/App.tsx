@@ -9,7 +9,9 @@ import {
   PiCpu,
   PiMemory,
   PiHardDrive,
-  PiDesktop
+  PiDesktop,
+  PiRobot,
+  PiTrash
 } from 'react-icons/pi'
 import { buildSmartGroups } from './grouping'
 import { evaluateRule, summarizeRule } from '../shared/rules'
@@ -137,6 +139,15 @@ export default function App() {
   const [sandboxBusy, setSandboxBusy] = useState(false)
   const [sandboxError, setSandboxError] = useState('')
   const [settingsReady, setSettingsReady] = useState(false)
+  const [createdFolders, setCreatedFolders] = useState([])
+  const [createdFoldersLoading, setCreatedFoldersLoading] = useState(false)
+  const [createdFoldersError, setCreatedFoldersError] = useState('')
+  const [groupDetails, setGroupDetails] = useState(null)
+  const [groupFiles, setGroupFiles] = useState([])
+  const [groupFolderName, setGroupFolderName] = useState('')
+  const [groupBasePath, setGroupBasePath] = useState('')
+  const [groupResolvedPath, setGroupResolvedPath] = useState('')
+  const [groupBusy, setGroupBusy] = useState(false)
 
   const suggestions = analysis.suggestions || []
   const smartGroups = useMemo(() => buildSmartGroups(scanResult.files || []), [scanResult.files])
@@ -171,6 +182,9 @@ export default function App() {
       loadScanConfig()
       loadAutomationMode()
     }
+    if (view === 'folders') {
+      loadCreatedFolders()
+    }
     if (view === 'system') {
       loadSystemInfo()
     }
@@ -189,6 +203,11 @@ export default function App() {
     if (!settingsReady || !scanConfig) return
     persistSettings().catch(() => {})
   }, [scanScope, includeHidden, maxSizeMB, scanSets, settingsReady, scanConfig])
+
+  useEffect(() => {
+    if (!groupDetails) return
+    resolveGroupPath(groupBasePath, groupFolderName)
+  }, [groupDetails, groupBasePath, groupFolderName])
 
   async function loadSystemInfo() {
     try {
@@ -455,6 +474,158 @@ export default function App() {
       await api.openSandboxFolder()
     } catch (err) {
       setSandboxError(err?.message || 'Failed to open sandbox.')
+    }
+  }
+
+  async function loadCreatedFolders() {
+    setCreatedFoldersError('')
+    setCreatedFoldersLoading(true)
+    try {
+      if (!api?.listCreatedFolders) {
+        throw new Error('Folders bridge unavailable. Please restart the app.')
+      }
+      const items = await api.listCreatedFolders()
+      setCreatedFolders(Array.isArray(items) ? items : [])
+    } catch (err) {
+      setCreatedFoldersError(err?.message || 'Failed to load folders.')
+    } finally {
+      setCreatedFoldersLoading(false)
+    }
+  }
+
+  async function handleRenameFolder(item) {
+    const nextName = window.prompt?.('Rename folder', item.displayName || '')?.trim()
+    if (!nextName) return
+    setCreatedFoldersError('')
+    try {
+      if (!api?.renameCreatedFolder) {
+        throw new Error('Rename bridge unavailable. Please restart the app.')
+      }
+      await api.renameCreatedFolder(item.id, nextName)
+      await loadCreatedFolders()
+    } catch (err) {
+      setCreatedFoldersError(err?.message || 'Failed to rename folder.')
+    }
+  }
+
+  async function handleUpdateFolderMeta(item) {
+    const nextName = window.prompt?.('Display name', item.displayName || '')?.trim()
+    if (!nextName) return
+    setCreatedFoldersError('')
+    try {
+      if (!api?.updateCreatedFolder) {
+        throw new Error('Update bridge unavailable. Please restart the app.')
+      }
+      await api.updateCreatedFolder(item.id, { displayName: nextName, updatedAt: Date.now() })
+      await loadCreatedFolders()
+    } catch (err) {
+      setCreatedFoldersError(err?.message || 'Failed to update metadata.')
+    }
+  }
+
+  function openGroupDetails(group) {
+    const defaultBase = scanConfig?.sets?.find((set) => set.id === 'documents')?.path
+      || scanConfig?.sets?.find((set) => set.id === 'downloads')?.path
+      || scanConfig?.sets?.[0]?.path
+      || ''
+    setGroupDetails(group)
+    setGroupFiles(group.files || [])
+    setGroupFolderName(group.title || 'Organized group')
+    setGroupBasePath(defaultBase || '')
+    setGroupResolvedPath('')
+  }
+
+  async function resolveGroupPath(basePath, folderName) {
+    if (!api?.resolveFolderTarget || !basePath || !folderName) {
+      setGroupResolvedPath('')
+      return
+    }
+    try {
+      const result = await api.resolveFolderTarget(basePath, folderName)
+      setGroupResolvedPath(result?.path || '')
+    } catch {
+      setGroupResolvedPath('')
+    }
+  }
+
+  async function handleAddFileFromDisk() {
+    if (!api?.selectFile) return
+    const result = await api.selectFile()
+    if (result?.canceled || !result?.path) return
+    const exists = groupFiles.some((file) => file.path === result.path)
+    if (exists) return
+    setGroupFiles((prev) => [
+      ...prev,
+      {
+        path: result.path,
+        name: result.path.split(/[/\\\\]/).pop(),
+        size: 0,
+        mtimeMs: Date.now()
+      }
+    ])
+  }
+
+  async function handlePreviewFile(file) {
+    if (!api?.openPath) return
+    await api.openPath(file.path)
+  }
+
+  async function handlePickGroupBase() {
+    if (!api?.selectFolder) return
+    const path = await api.selectFolder()
+    if (!path) return
+    setGroupBasePath(path)
+  }
+
+  async function handleCreateGroupPlan() {
+    if (!groupDetails || !groupFiles.length) return
+    let resolvedPath = groupResolvedPath
+    if (!resolvedPath && api?.resolveFolderTarget) {
+      const result = await api.resolveFolderTarget(groupBasePath, groupFolderName)
+      resolvedPath = result?.path || ''
+      setGroupResolvedPath(resolvedPath)
+    }
+    if (!resolvedPath) return
+
+    setGroupBusy(true)
+    try {
+      const groupId = groupDetails.id || `group-${Date.now()}`
+      const folderEntryId = crypto.randomUUID ? crypto.randomUUID() : `folder-${Date.now()}`
+      const actions = groupFiles.map((file, index) => ({
+        id: crypto.randomUUID ? crypto.randomUUID() : `action-${Date.now()}-${index}`,
+        createdAt: Date.now(),
+        ruleId: `smart-group:${groupId}`,
+        source: 'manual',
+        fromPath: file.path,
+        toPath: `${resolvedPath}/${file.name || file.path.split(/[/\\\\]/).pop()}`,
+        reason: `Smart group: ${groupDetails.title}`,
+        sizeBytes: file.size || 0,
+        status: 'queued',
+        groupId,
+        groupTitle: groupDetails.title,
+        targetFolderPath: resolvedPath,
+        createFolderEntry: index === 0,
+        folderEntryId
+      }))
+
+      if (!api?.enqueueProposedActions) {
+        throw new Error('Queue bridge unavailable. Please restart the app.')
+      }
+      await api.enqueueProposedActions(actions)
+
+      if (automationMode === 'auto' && api?.applyProposedAction) {
+        for (const action of actions) {
+          await api.applyProposedAction(action.id)
+        }
+      }
+
+      await loadReviewQueue()
+      await loadCreatedFolders()
+      setGroupDetails(null)
+    } catch (err) {
+      setError(err?.message || 'Failed to create group plan.')
+    } finally {
+      setGroupBusy(false)
     }
   }
 
@@ -959,11 +1130,12 @@ export default function App() {
     { id: 'dashboard', label: 'Dashboard', icon: <PiGauge size={18} /> },
     { id: 'review-queue', label: 'Review Queue', icon: <PiWrench size={18} /> },
     { id: 'rules', label: 'Rules', icon: <PiLightning size={18} /> },
-    { id: 'archive', label: 'Archive', icon: <PiHardDrive size={18} /> },
+    { id: 'archive', label: 'Archive', icon: <PiTrash size={18} /> },
+    { id: 'folders', label: 'Folders', icon: <PiFolder size={18} /> },
     { id: 'sandbox', label: 'Sandbox', icon: <PiCpu size={18} /> },
     { id: 'settings', label: 'Settings', icon: <PiDesktop size={18} /> },
     { id: 'organizer', label: 'Cleaner', icon: <PiBroomBold size={18} /> },
-    { id: 'activity', label: 'Activity Ledger', icon: <PiFolder size={18} /> },
+    { id: 'activity', label: 'Activity Ledger', icon: <PiRobot size={18} /> },
     { id: 'system', label: 'System Settings', icon: <PiLaptop size={18} /> }
   ]
 
@@ -998,6 +1170,13 @@ export default function App() {
         kicker: 'Automation',
         title: 'Archive',
         subtitle: 'Review archived items and restore safely.'
+      }
+    }
+    if (view === 'folders') {
+      return {
+        kicker: 'Automation',
+        title: 'Created folders',
+        subtitle: 'Folders created by BundleBud for group plans.'
       }
     }
     if (view === 'sandbox') {
@@ -1497,6 +1676,50 @@ export default function App() {
           </div>
         ) : (
           <p className="muted">No archived items yet.</p>
+        )}
+      </div>
+    )
+  }
+
+  if (view === 'folders') {
+    return renderShell(
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Created folders</h2>
+          <p className="muted">Track and manage folders created from smart group plans.</p>
+        </div>
+
+        {createdFoldersError ? <div className="error">{createdFoldersError}</div> : null}
+        {createdFoldersLoading ? <p className="muted">Loading folders…</p> : null}
+
+        {createdFolders.length ? (
+          <div className="folders-list">
+            {createdFolders.map((item) => (
+              <div className="folder-row" key={item.id}>
+                <div>
+                  <div className="folder-title">{item.displayName || item.path?.split(/[/\\\\]/).pop()}</div>
+                  <div className="muted mono">{shortenPath(item.path)}</div>
+                  <div className="muted">{formatLocalTime(item.createdAt)}</div>
+                  {item.sourceGroupTitle ? (
+                    <div className="muted">Group: {item.sourceGroupTitle}</div>
+                  ) : null}
+                </div>
+                <div className="folder-actions">
+                  <button className="ghost" onClick={() => api?.revealInFinder(item.path)}>
+                    Open in Finder
+                  </button>
+                  <button className="ghost" onClick={() => handleRenameFolder(item)}>
+                    Rename
+                  </button>
+                  <button className="ghost" onClick={() => handleUpdateFolderMeta(item)}>
+                    Edit metadata
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No folders created yet.</p>
         )}
       </div>
     )
@@ -2154,20 +2377,18 @@ export default function App() {
           {smartGroups.length ? (
             <div className="group-grid">
               {smartGroups.map((group) => (
-                <details className="group-card" key={group.id}>
-                  <summary>
-                    <div>
-                      <div className="group-title">{group.title}</div>
-                      <div className="group-meta">
-                        <span>{group.files.length} files</span>
-                        {group.reason.map((reason) => (
-                          <span key={reason}>{reason}</span>
-                        ))}
-                      </div>
+                <button className="group-card" key={group.id} onClick={() => openGroupDetails(group)}>
+                  <div>
+                    <div className="group-title">{group.title}</div>
+                    <div className="group-meta">
+                      <span>{group.files.length} files</span>
+                      {group.reason.map((reason) => (
+                        <span key={reason}>{reason}</span>
+                      ))}
                     </div>
-                  </summary>
+                  </div>
                   <div className="group-body">
-                    {group.files.map((file) => (
+                    {group.files.slice(0, 3).map((file) => (
                       <div className="group-file" key={file.path}>
                         <span className="mono">{file.relPath || file.name}</span>
                         <span className="muted">
@@ -2175,14 +2396,136 @@ export default function App() {
                         </span>
                       </div>
                     ))}
+                    {group.files.length > 3 ? (
+                      <div className="group-file muted">+{group.files.length - 3} more</div>
+                    ) : null}
                   </div>
-                </details>
+                </button>
               ))}
             </div>
           ) : (
             <p className="muted">No smart groups suggested for this scan.</p>
           )}
         </section>
+
+        {groupDetails ? (
+          <div className="modal-scrim">
+            <div className="modal-card">
+              <div className="modal-header">
+                <div>
+                  <h2>{groupDetails.title}</h2>
+                  <p className="muted">{(groupDetails.reason || []).join(' · ')}</p>
+                </div>
+                <button className="ghost" onClick={() => setGroupDetails(null)}>
+                  Close
+                </button>
+              </div>
+
+              <section className="section">
+                <div className="section-header">
+                  <h2>Files in group</h2>
+                  <p className="muted">{groupFiles.length} files selected.</p>
+                </div>
+                <div className="group-file-list">
+                  {groupFiles.map((file) => (
+                    <div className="group-file-row" key={file.path}>
+                      <div>
+                        <div className="mono">{file.relPath || file.name}</div>
+                        <div className="muted">{shortenPath(file.path)}</div>
+                      </div>
+                      <div className="group-file-actions">
+                        <button className="ghost small" onClick={() => handlePreviewFile(file)}>
+                          Preview
+                        </button>
+                        <button
+                          className="ghost small"
+                          onClick={() =>
+                            setGroupFiles((prev) => prev.filter((entry) => entry.path !== file.path))
+                          }
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="group-add-row">
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const nextPath = event.target.value
+                      if (!nextPath) return
+                      const nextFile = scanResult.files.find((file) => file.path === nextPath)
+                      if (nextFile) {
+                        setGroupFiles((prev) => [...prev, nextFile])
+                      }
+                      event.target.value = ''
+                    }}
+                  >
+                    <option value="">Add from scan results…</option>
+                    {scanResult.files
+                      .filter((file) => !groupFiles.some((entry) => entry.path === file.path))
+                      .map((file) => (
+                        <option value={file.path} key={file.path}>
+                          {file.relPath || file.name}
+                        </option>
+                      ))}
+                  </select>
+                  <button className="ghost" onClick={handleAddFileFromDisk}>
+                    Browse file…
+                  </button>
+                </div>
+              </section>
+
+              <section className="section">
+                <div className="section-header">
+                  <h2>Destination</h2>
+                  <p className="muted">Customize the folder before applying.</p>
+                </div>
+                <label className="label">Folder name</label>
+                <input
+                  className="input"
+                  value={groupFolderName}
+                  onChange={(event) => setGroupFolderName(event.target.value)}
+                />
+                <label className="label">Base location</label>
+                <div className="group-destination-row">
+                  <input
+                    className="input"
+                    value={groupBasePath}
+                    onChange={(event) => setGroupBasePath(event.target.value)}
+                  />
+                  <button className="ghost small" onClick={handlePickGroupBase}>
+                    Choose…
+                  </button>
+                </div>
+                <div className="summary">
+                  <div className="summary-row">
+                    <span>Target</span>
+                    <span className="mono">{groupResolvedPath || '—'}</span>
+                  </div>
+                  <div className="summary-row">
+                    <span>Files</span>
+                    <span>{groupFiles.length}</span>
+                  </div>
+                </div>
+              </section>
+
+              <footer className="footer">
+                <button className="ghost" onClick={() => setGroupDetails(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="primary"
+                  onClick={handleCreateGroupPlan}
+                  disabled={groupBusy || !groupFiles.length || !groupBasePath || !groupFolderName}
+                >
+                  {groupBusy ? 'Queuing…' : 'Create folder and move files'}
+                </button>
+              </footer>
+            </div>
+          </div>
+        ) : null}
 
         {['move-to-archive', 'move-to-trash', 'keep'].map((type) => (
           <section className="section" key={type}>
