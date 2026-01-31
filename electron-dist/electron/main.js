@@ -12,7 +12,8 @@ import chokidar from 'chokidar';
 import { processFile, executeMoveAction } from './agent/processFile.js';
 import { getDashboardStats } from './agent/stats.js';
 import { listArchiveItems, updateArchiveItem } from './agent/archiveStore.js';
-import { getAutomationMode, setAutomationMode, listReviewQueue, updateProposedAction, listRules, saveRules, getSettings, saveSettings } from './agent/automationStore.js';
+import { listCreatedFolders, updateCreatedFolder } from './agent/createdFoldersStore.js';
+import { getAutomationMode, setAutomationMode, listReviewQueue, updateProposedAction, enqueueProposedActions, listRules, saveRules, getSettings, saveSettings } from './agent/automationStore.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 let mainWindow;
@@ -89,6 +90,25 @@ async function moveFileSafe(source, destination) {
         }
         else {
             throw error;
+        }
+    }
+}
+async function ensureUniqueFolderPath(targetPath) {
+    let candidate = targetPath;
+    let counter = 2;
+    while (true) {
+        try {
+            const stats = await fs.stat(candidate);
+            if (!stats.isDirectory()) {
+                candidate = `${targetPath} (${counter})`;
+                counter += 1;
+                continue;
+            }
+            candidate = `${targetPath} (${counter})`;
+            counter += 1;
+        }
+        catch {
+            return candidate;
         }
     }
 }
@@ -491,6 +511,9 @@ ipcMain.handle('automation:setMode', async (_event, mode) => {
 ipcMain.handle('automation:listQueue', async () => {
     return listReviewQueue();
 });
+ipcMain.handle('automation:enqueueProposedActions', async (_event, actions) => {
+    return enqueueProposedActions(actions);
+});
 ipcMain.handle('automation:listRules', async () => {
     return listRules();
 });
@@ -502,6 +525,73 @@ ipcMain.handle('automation:getSettings', async () => {
 });
 ipcMain.handle('automation:saveSettings', async (_event, settings) => {
     return saveSettings(settings);
+});
+ipcMain.handle('folders:resolveTarget', async (_event, basePath, folderName) => {
+    if (!basePath || !folderName)
+        return { ok: false, error: 'Missing folder info.' };
+    const proposed = path.join(basePath, folderName);
+    const resolved = await ensureUniqueFolderPath(proposed);
+    return { ok: true, path: resolved };
+});
+ipcMain.handle('folders:listCreated', async () => {
+    return listCreatedFolders();
+});
+ipcMain.handle('folders:updateMeta', async (_event, itemId, updates) => {
+    return updateCreatedFolder(itemId, updates);
+});
+ipcMain.handle('folders:rename', async (_event, itemId, nextName) => {
+    const items = await listCreatedFolders();
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item)
+        return { ok: false, error: 'Folder not found.' };
+    if (!nextName)
+        return { ok: false, error: 'Name is required.' };
+    const parent = path.dirname(item.path);
+    const target = await ensureUniqueDestination(path.join(parent, nextName));
+    let status = 'success';
+    let errorMessage = '';
+    try {
+        await fs.rename(item.path, target);
+    }
+    catch (err) {
+        status = 'error';
+        errorMessage = err?.message || String(err);
+    }
+    const updated = await updateCreatedFolder(itemId, {
+        path: status === 'success' ? target : item.path,
+        displayName: status === 'success' ? nextName : item.displayName,
+        renamedAt: Date.now(),
+        error: errorMessage || null
+    });
+    await appendEntry({
+        id: randomUUID(),
+        ts: Date.now(),
+        kind: 'action',
+        title: 'Renamed folder',
+        path: item.path,
+        status: status === 'success' ? 'success' : 'error',
+        meta: {
+            action: 'rename-folder',
+            from: item.path,
+            to: target,
+            error: errorMessage || null
+        }
+    });
+    return { ok: status === 'success', action: updated, error: errorMessage || null };
+});
+ipcMain.handle('files:open', async (_event, targetPath) => {
+    if (!targetPath)
+        return { ok: false, error: 'Missing path.' };
+    const result = await shell.openPath(targetPath);
+    return { ok: !result, error: result || null };
+});
+ipcMain.handle('files:select', async () => {
+    const result = await dialog.showOpenDialog({
+        properties: ['openFile']
+    });
+    if (result.canceled || !result.filePaths.length)
+        return { canceled: true };
+    return { canceled: false, path: result.filePaths[0] };
 });
 ipcMain.handle('archive:list', async () => {
     return listArchiveItems();

@@ -104,6 +104,13 @@ export async function enqueueProposedAction(action) {
     await writeStore(store);
     return action;
 }
+export async function enqueueProposedActions(actions = []) {
+    const store = await readStore();
+    const items = Array.isArray(actions) ? actions : [];
+    store.reviewQueue.push(...items);
+    await writeStore(store);
+    return items;
+}
 export async function updateProposedAction(actionId, updates) {
     const store = await readStore();
     const index = store.reviewQueue.findIndex((item) => item.id === actionId);

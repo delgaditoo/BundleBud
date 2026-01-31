@@ -3,6 +3,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { appendEntry } from './ledger.js';
 import { appendArchiveItem, isArchivePath } from './archiveStore.js';
+import { appendCreatedFolder } from './createdFoldersStore.js';
 import { applyRules } from '../rules/index.js';
 import { getAutomationMode, enqueueProposedAction } from './automationStore.js';
 const inflight = new Set();
@@ -136,6 +137,21 @@ export async function executeMoveAction(proposedAction) {
         }
         catch {
             // Ignore archive index errors.
+        }
+    }
+    if (status === 'success' && proposedAction?.createFolderEntry && proposedAction?.targetFolderPath) {
+        try {
+            await appendCreatedFolder({
+                id: proposedAction.folderEntryId || randomUUID(),
+                displayName: proposedAction.groupTitle || path.basename(proposedAction.targetFolderPath),
+                path: proposedAction.targetFolderPath,
+                createdAt: Date.now(),
+                sourceGroupId: proposedAction.groupId || null,
+                sourceGroupTitle: proposedAction.groupTitle || null
+            });
+        }
+        catch {
+            // Ignore created folder index errors.
         }
     }
     return { status, finalDestination, errorMessage };
